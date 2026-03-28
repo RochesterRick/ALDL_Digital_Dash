@@ -236,8 +236,8 @@ static void update_slot_labels_from_id(int idx)
     else                        lv_obj_clear_flag(list_symbol_lbl[idx], LV_OBJ_FLAG_HIDDEN);
   }
 
-  if (valueRows[idx] && tileValues[idx]) set_row_gap_by_value_label(valueRows[idx], tileValues[idx]);
-  if (list_value_row[idx] && list_value_lbl[idx]) set_row_gap_by_value_label(list_value_row[idx], list_value_lbl[idx]);
+  //if (valueRows[idx] && tileValues[idx]) set_row_gap_by_value_label(valueRows[idx], tileValues[idx]);
+  //if (list_value_row[idx] && list_value_lbl[idx]) set_row_gap_by_value_label(list_value_row[idx], list_value_lbl[idx]);
 }
 
 static void update_detail_from_slot(int idx)
@@ -259,7 +259,7 @@ static void update_detail_from_slot(int idx)
   if (!sym || sym[0] == '\0') lv_obj_add_flag(detail_symbol, LV_OBJ_FLAG_HIDDEN);
   else                        lv_obj_clear_flag(detail_symbol, LV_OBJ_FLAG_HIDDEN);
 
-  set_row_gap_by_value_label(detail_value_row, detail_value);
+  //set_row_gap_by_value_label(detail_value_row, detail_value);
 
   lv_obj_set_style_text_color(detail_name,   lv_color_hex(TILE_ACCENT_HEX[idx]), 0);
   lv_obj_set_style_text_color(detail_symbol, lv_color_hex(TILE_ACCENT_HEX[idx]), 0);
@@ -465,6 +465,24 @@ static bool decode_field_to_text_from_frame(const DataField* f, const uint8_t* f
   if (mpg > 99.9f) mpg = 99.9f;
 
   snprintf(out, outSize, "%.1f", (double)mpg);
+  return true;
+}
+
+if (strcmp(f->id, "CMDF4_AFR_EST") == 0) {
+  const DataField* o2F = findFieldByID("CMDF4_O2_SENSOR", COMMAND1_FIELDS, COMMAND1_FIELD_COUNT);
+  if (!o2F) return false;
+
+  char o2Buf[24];
+  if (!decode_field_to_text_from_frame(o2F, frame, len, o2Buf, sizeof(o2Buf))) return false;
+
+  float mv = atof(o2Buf);
+
+  float afr = 14.7f - ((mv - 450.0f) / 100.0f) * 0.25f;
+
+  if (afr < 13.0f) afr = 13.0f;
+  if (afr > 16.0f) afr = 16.0f;
+
+  snprintf(out, outSize, "%.1f", (double)afr);
   return true;
 }
 
@@ -772,6 +790,8 @@ static void build_ui_tiles()
   for (int i = 0; i < kSlotCount; i++) {
     lv_obj_t *tile = lv_obj_create(scr);
     tiles[i] = tile;
+    valueRows[i] = nullptr;  // no shared value/symbol row in tile layout now
+
     lv_obj_add_event_cb(tile, tile_event_cb, LV_EVENT_CLICKED, (void*)(intptr_t)i);
     lv_obj_clear_flag(tile, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_style_radius(tile, 14, 0);
@@ -807,22 +827,11 @@ static void build_ui_tiles()
     lv_obj_set_style_text_color(tileHeaders[i], lv_color_hex(TILE_ACCENT_HEX[i]), 0);
     lv_obj_set_style_text_letter_space(tileHeaders[i], 2, 0);
 
-    valueRows[i] = lv_obj_create(tile);
-    lv_obj_add_flag(valueRows[i], LV_OBJ_FLAG_FLOATING);
-    lv_obj_add_flag(valueRows[i], LV_OBJ_FLAG_EVENT_BUBBLE);
-    lv_obj_clear_flag(valueRows[i], LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_style_bg_opa(valueRows[i], LV_OPA_TRANSP, 0);
-    lv_obj_set_style_border_width(valueRows[i], 0, 0);
-    lv_obj_set_style_pad_all(valueRows[i], 0, 0);
-    lv_obj_set_style_pad_row(valueRows[i], 0, 0);
-    lv_obj_set_size(valueRows[i], lv_pct(100), LV_SIZE_CONTENT);
-    lv_obj_align(valueRows[i], LV_ALIGN_CENTER, 0, 14);
-    lv_obj_set_layout(valueRows[i], 0);
-
-    tileValues[i] = lv_label_create(valueRows[i]);
+    tileValues[i] = lv_label_create(tile);
     lv_obj_set_style_bg_opa(tileValues[i], LV_OPA_COVER, 0);
     lv_obj_set_style_bg_color(tileValues[i], lv_color_hex(0x0B1033), 0);
     lv_obj_set_style_pad_all(tileValues[i], 2, 0);
+    lv_obj_add_flag(tileValues[i], LV_OBJ_FLAG_FLOATING);
     lv_obj_add_flag(tileValues[i], LV_OBJ_FLAG_EVENT_BUBBLE);
     lv_label_set_text(tileValues[i], "--");
     #if USE_CUSTOM_FONT_64
@@ -835,30 +844,29 @@ static void build_ui_tiles()
       lv_obj_set_style_text_font(tileValues[i], LV_FONT_DEFAULT, 0);
     #endif
     lv_obj_set_style_text_color(tileValues[i], lv_color_hex(TILE_VALUE_HEX[i]), 0);
-    lv_obj_set_style_min_width(tileValues[i], 180, 0);
-    lv_obj_set_style_text_align(tileValues[i], LV_TEXT_ALIGN_RIGHT, 0);
+    lv_obj_set_style_text_align(tileValues[i], LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_align(tileValues[i], LV_ALIGN_CENTER, 0, 10);
 
-    tileSymbols[i] = lv_label_create(valueRows[i]);
+    tileSymbols[i] = lv_label_create(tile);
     lv_obj_set_style_bg_opa(tileSymbols[i], LV_OPA_COVER, 0);
     lv_obj_set_style_bg_color(tileSymbols[i], lv_color_hex(0x0B1033), 0);
     lv_obj_set_style_pad_all(tileSymbols[i], 2, 0);
+    lv_obj_add_flag(tileSymbols[i], LV_OBJ_FLAG_FLOATING);
     lv_obj_add_flag(tileSymbols[i], LV_OBJ_FLAG_EVENT_BUBBLE);
-    #if defined(LV_FONT_MONTSERRAT_28) && LV_FONT_MONTSERRAT_28
+    #if defined(LV_FONT_MONTSERRAT_22) && LV_FONT_MONTSERRAT_22
+      lv_obj_set_style_text_font(tileSymbols[i], &lv_font_montserrat_22, 0);
+    #elif defined(LV_FONT_MONTSERRAT_28) && LV_FONT_MONTSERRAT_28
       lv_obj_set_style_text_font(tileSymbols[i], &lv_font_montserrat_28, 0);
     #else
       lv_obj_set_style_text_font(tileSymbols[i], LV_FONT_DEFAULT, 0);
     #endif
     lv_obj_set_style_text_color(tileSymbols[i], lv_color_hex(TILE_ACCENT_HEX[i]), 0);
-
-    lv_obj_set_pos(tileValues[i], 0, 0);
-    lv_obj_set_pos(tileSymbols[i], 0, 0);
-    lv_obj_align(tileValues[i], LV_ALIGN_CENTER, -24, 0);
-    lv_obj_align_to(tileSymbols[i], tileValues[i], LV_ALIGN_OUT_RIGHT_MID, 10, 0);
+    lv_obj_align(tileSymbols[i], LV_ALIGN_BOTTOM_LEFT, 8, -6);
 
     update_slot_labels_from_id(i);
-    set_row_gap_by_value_label(valueRows[i], tileValues[i]);
   }
 }
+
 
 static void build_ui_list_detail()
 {
@@ -949,7 +957,7 @@ static void build_ui_list_detail()
       lv_obj_set_style_text_font(list_value_lbl[i], LV_FONT_DEFAULT, 0);
     #endif
     lv_obj_set_style_text_color(list_value_lbl[i], lv_color_hex(TILE_VALUE_HEX[i]), 0);
-    lv_obj_set_style_min_width(list_value_lbl[i], 140, 0);
+    lv_obj_set_style_min_width(list_value_lbl[i], 100, 0);
     lv_obj_set_style_text_align(list_value_lbl[i], LV_TEXT_ALIGN_RIGHT, 0);
 
     list_symbol_lbl[i] = lv_label_create(list_value_row[i]);
@@ -964,11 +972,11 @@ static void build_ui_list_detail()
     #endif
     lv_obj_set_style_text_color(list_symbol_lbl[i], lv_color_hex(TILE_ACCENT_HEX[i]), 0);
 
-    lv_obj_align(list_value_lbl[i], LV_ALIGN_RIGHT_MID, -28, 0);
-    lv_obj_align_to(list_symbol_lbl[i], list_value_lbl[i], LV_ALIGN_OUT_RIGHT_MID, 10, 0);
+    lv_obj_align(list_value_lbl[i], LV_ALIGN_RIGHT_MID, -4, 0);
+    lv_obj_align_to(list_symbol_lbl[i], list_value_lbl[i], LV_ALIGN_OUT_RIGHT_MID, 2, 0);
 
     update_slot_labels_from_id(i);
-    set_row_gap_by_value_label(list_value_row[i], list_value_lbl[i]);
+    //set_row_gap_by_value_label(list_value_row[i], list_value_lbl[i]);
   }
 
   detail_name = lv_label_create(detail_col);

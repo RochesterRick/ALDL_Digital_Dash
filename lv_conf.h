@@ -1,76 +1,36 @@
 #ifndef LV_CONF_H
 #define LV_CONF_H
-
 #warning "USING SKETCH lv_conf.h"
 
+/*====================
+ * COLOR / MEMORY
+ *====================*/
 #define LV_COLOR_DEPTH 16
-#define LV_COLOR_16_SWAP 0
-
 #define LV_MEM_CUSTOM 0
-#define LV_MEM_SIZE (128U * 1024U)
-
 #define LV_USE_LOG 0
-#define LV_USE_ASSERT_NULL 0
-#define LV_USE_ASSERT_MALLOC 0
-#define LV_USE_ASSERT_STYLE 0
-#define LV_USE_ASSERT_MEM_INTEGRITY 0
-#define LV_USE_ASSERT_OBJ 0
 
+/*====================
+ * FONTS (ENABLE THESE)
+ *====================*/
+#define LV_FONT_MONTSERRAT_22  1
+#define LV_FONT_MONTSERRAT_28  1
+#define LV_FONT_MONTSERRAT_40  1
+#define LV_FONT_MONTSERRAT_48  1
+#define LV_FONT_MONTSERRAT_56  1
+#define LV_FONT_MONTSERRAT_64  1
+
+/*====================
+ * CORE DRAW
+ *====================*/
 #define LV_USE_DRAW_SW 1
-#define LV_USE_DRAW_SW_ASM LV_DRAW_SW_ASM_NONE
-#define LV_USE_DRAW_SW_COMPLEX 1
-#define LV_USE_DRAW_SW_SHADOW 1
-#define LV_USE_DRAW_SW_BLEND 1
-#define LV_USE_DRAW_SW_TRANSFORM 1
-#define LV_USE_DRAW_SW_TRIANGLE 1
+#define LV_USE_TICK_CUSTOM 0
 
-#define LV_USE_ANIMATION 1
-#define LV_USE_SHADOW 1
-#define LV_USE_GROUP 1
-#define LV_USE_GRID 1
-#define LV_USE_FLEX 1
-#define LV_USE_USER_DATA 1
-
-#define LV_USE_LABEL 1
-#define LV_USE_BTN 1
-#define LV_USE_OBJ 1
-#define LV_USE_ARC 1
-#define LV_USE_BAR 1
-#define LV_USE_IMG 1
-#define LV_USE_LINE 1
-#define LV_USE_SWITCH 1
-#define LV_USE_SLIDER 1
-#define LV_USE_TEXTAREA 1
-#define LV_USE_DROPDOWN 1
-#define LV_USE_ROLLER 1
-#define LV_USE_CANVAS 1
-
-#define LV_FONT_MONTSERRAT_12 1
-#define LV_FONT_MONTSERRAT_14 1
-#define LV_FONT_MONTSERRAT_16 1
-#define LV_FONT_MONTSERRAT_18 1
-#define LV_FONT_MONTSERRAT_20 1
-#define LV_FONT_MONTSERRAT_22 1
-#define LV_FONT_MONTSERRAT_24 1
-#define LV_FONT_MONTSERRAT_26 1
-#define LV_FONT_MONTSERRAT_28 1
-#define LV_FONT_MONTSERRAT_30 1
-#define LV_FONT_MONTSERRAT_32 1
-#define LV_FONT_MONTSERRAT_34 1
-#define LV_FONT_MONTSERRAT_36 1
-#define LV_FONT_MONTSERRAT_40 1
-#define LV_FONT_MONTSERRAT_48 1
-
-#define LV_FONT_DEFAULT &lv_font_montserrat_16
-
-#define LV_USE_THEME_DEFAULT 1
-#define LV_THEME_DEFAULT_DARK 1
-#define LV_THEME_DEFAULT_GROW 0
-#define LV_USE_THEME_BASIC 0
-#define LV_USE_THEME_MONO 0
-
-#define LV_USE_PERF_MONITOR 0
-#define LV_USE_MEM_MONITOR 0
-#define LV_USE_SYSMON 0
+/*====================
+ * DISABLE DESKTOP / GPU STUFF
+ *====================*/
+#define LV_USE_DRAW_VG_LITE 0
+#define LV_USE_LINUX_DRM 0
+#define LV_USE_LINUX_FBDEV 0
+#define LV_USE_EVDEV 0
 
 #endif
