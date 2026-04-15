@@ -1,55 +1,22 @@
-// V6_11b_len67fix.ino — JC8048W550C (ESP32-8048S050C) DASH UI + ALDL (F4 fields)
-// Uses ADS-matched btByteNumber values from ALDLCore.h with 1-based byte numbering.
-//
-// Applied ALDL rules:
-// 1) Good F4 frames are exactly 64 bytes total.
-// 2) Reject any frame that is not exactly 64 bytes.
-// 3) 63-byte frames are bad/truncated and ignored.
-// 4) If a raw receive is 67 bytes, treat it as 3 extra leading bytes + 64-byte frame.
-// 5) Diagnostic raw receive is preserved before any normalization.
-// 6) Poll timing uses ~40 ms response delay and ~60 ms receive window.
-// 7) Last good 64-byte frame is preserved.
-// 8) Flow is: flush -> send request -> wait -> receive -> normalize -> validate -> decode -> UI
-//
-// Byte numbering note:
-// ALDLCore.h stores ADS btByteNumber values exactly as shown in the ADS file.
-// ADS numbering is 1-based.
-// Raw frame access converts with: frame[adsByteNumber - 1]
-/*
-===== REQUIRED ARDUINO SETTINGS =====
-Board: ESP32S3 Dev Module
-Flash Size: 16MB
-PSRAM: OPI PSRAM
-Partition: Huge APP
-USB CDC On Boot: Enabled
-CPU Freq: 240MHz
-
-Board profile:
-- JC8048W550C (ESP32-8048S050C)
-- Backlight: GPIO2 HIGH
-====================================
-*/
+// ALDL_DigitalDash.ino — JC8048W550C (ESP32-8048S050C) DASH UI + ALDL (F4/F5 fields)
 
 #include <Arduino.h>
 #include "esp_display_panel.hpp"
 #include "lvgl_v8_port.h"
 
-// Optional: custom BIG font (drop montserrat_64.c into this sketch folder)
 #define USE_CUSTOM_FONT_64 0
 #if USE_CUSTOM_FONT_64
   #include "montserrat_64.c"
   LV_FONT_DECLARE(lv_font_montserrat_64);
 #endif
 
-#include "ALDLCore.h"  // COMMAND1_FIELDS (F4 list) + PersistentIDs + findFieldByID
+#include "ALDLCore.h"
 
 // ----------------- Layout toggle pin -----------------
 #define MODE_PIN 20
 
-// ----------------- ALDL pins (bit-bang TX + UART RX) -----------------
+// ----------------- ALDL pins -----------------
 #define ENABLE_ALDL 1
-//#define ALDL_RX_PIN     17
-//#define ALDL_TX_PIN     18
 #define ALDL_RX_PIN     17
 #define ALDL_TX_PIN     18
 #define ALDL_EN_RX_PIN  11
@@ -63,18 +30,19 @@ Board profile:
 #define BIT_TIME_US                  122
 
 #define FRAME_MAX_LEN          96
-#define FRAME_VALID_LEN        64
+#define F4_VALID_LEN           64
+#define F5_VALID_LEN           70
 #define FRAME_LOG_CAPACITY     50
 
-// ----------------- WiFi / Web (SoftAP) -----------------
 #define ENABLE_WIFI_WEB 0
 #if ENABLE_WIFI_WEB
+#include <WiFi.h>
+#include <WebServer.h>
 static const char* AP_SSID = "ALDL-Dash";
 static const char* AP_PASS = "12345678";
 static WebServer server(80);
 #endif
-
-// ----------------- Per-slot color theme -----------------
+static bool validate_len_for_source(FieldSource src, size_t len);
 static const uint32_t TILE_ACCENT_HEX[6] = {
   0x00E5FF, 0xFFD400, 0x00E5FF, 0xFF2D95, 0x00E5FF, 0xB084FF
 };
@@ -82,7 +50,6 @@ static const uint32_t TILE_VALUE_HEX[6] = {
   0x39FF14, 0xFFD400, 0x5DF2FF, 0xFF69B4, 0x5DF2FF, 0xB084FF
 };
 
-// ----------------- Globals -----------------
 PersistentIDs idStore;
 
 enum LayoutMode : uint8_t { LAYOUT_TILES = 0, LAYOUT_LIST_DETAIL = 1 };
@@ -102,43 +69,43 @@ static lv_obj_t *valueRows[kSlotCount]   = {nullptr};
 static lv_obj_t *list_root = nullptr;
 static lv_obj_t *list_col  = nullptr;
 static lv_obj_t *detail_col = nullptr;
-
 static lv_obj_t *list_items[kSlotCount]       = {nullptr};
 static lv_obj_t *list_name_lbl[kSlotCount]    = {nullptr};
 static lv_obj_t *list_value_lbl[kSlotCount]   = {nullptr};
 static lv_obj_t *list_symbol_lbl[kSlotCount]  = {nullptr};
 static lv_obj_t *list_value_row[kSlotCount]   = {nullptr};
-
 static lv_obj_t *detail_name = nullptr;
 static lv_obj_t *detail_value = nullptr;
 static lv_obj_t *detail_symbol = nullptr;
 static lv_obj_t *detail_value_row = nullptr;
 
-// Latest validated ALDL frame (exact 64 bytes only)
-static uint8_t latestFrame[FRAME_VALID_LEN] = {0};
-static size_t  latestFrameLen = 0;
-static char    latestFrameHex[FRAME_VALID_LEN * 3 + 1] = {0};
-static char    latestJson[1600] = "{\"status\":\"no data yet\"}";
-static uint32_t latestFrameMillis = 0;
-static bool    haveValidFrame = false;
+// F4 and F5 last-good frames kept separately
+static uint8_t latestFrameF4[F4_VALID_LEN] = {0};
+static size_t  latestFrameF4Len = 0;
+static bool    haveValidFrameF4 = false;
+static uint32_t latestFrameF4Millis = 0;
 
-// Last raw receive attempt (may be invalid length, kept for diagnostics)
+static uint8_t latestFrameF5[F5_VALID_LEN] = {0};
+static size_t  latestFrameF5Len = 0;
+static bool    haveValidFrameF5 = false;
+static uint32_t latestFrameF5Millis = 0;
+
+// Last raw receive attempt, for diagnostics only
 static uint8_t latestRawFrame[FRAME_MAX_LEN] = {0};
 static size_t  latestRawFrameLen = 0;
 static char    latestRawFrameHex[FRAME_MAX_LEN * 3 + 1] = {0};
+static char    latestJson[2200] = "{\"status\":\"no data yet\"}";
 
-// Last good full raw 64-byte frame
-static uint8_t lastGoodRaw64[FRAME_VALID_LEN] = {0};
-static char    lastGoodRaw64Hex[FRAME_VALID_LEN * 3 + 1] = {0};
-static uint32_t lastGoodFrameMillis = 0;
-
-// Diagnostics
-static uint32_t goodFrameCount = 0;
-static uint32_t badLengthCount = 0;
-static uint32_t bad63Count = 0;
-static uint32_t timeoutCount = 0;
-static size_t   lastRejectedLength = 0;
-static uint32_t normalized67Count = 0;
+static uint32_t goodFrameCountF4 = 0;
+static uint32_t goodFrameCountF5 = 0;
+static uint32_t badLengthCountF4 = 0;
+static uint32_t badLengthCountF5 = 0;
+static uint32_t timeoutCountF4 = 0;
+static uint32_t timeoutCountF5 = 0;
+static size_t   lastRejectedLengthF4 = 0;
+static size_t   lastRejectedLengthF5 = 0;
+static uint32_t normalized67CountF4 = 0;
+static uint32_t normalized68CountF5 = 0;
 
 static char frameLog[FRAME_LOG_CAPACITY][FRAME_MAX_LEN * 3 + 64] = {{0}};
 static uint16_t frameLogCount = 0;
@@ -153,31 +120,25 @@ static void build_ui();
 static void build_ui_tiles();
 static void build_ui_list_detail();
 static void update_latest_raw_frame_buffers(const uint8_t* frame, size_t len);
-static void update_latest_frame_buffers(const uint8_t* frame, size_t len);
-static void update_last_good_frame_buffers(const uint8_t* frame, size_t len);
 static void tile_event_cb(lv_event_t *e);
 static void list_item_event_cb(lv_event_t *e);
-static int  cmdf4_index_of_id(const char* id);
 static void advance_saved_field(int slot_idx);
-
-static lv_coord_t symbol_gap_px_for_font(const lv_font_t* vf);
-static void set_row_gap_by_value_label(lv_obj_t* row, lv_obj_t* value_label);
-
-static void apply_selection_style_tiles(int idx);
-static void apply_selection_style_list(int idx);
 static void update_slot_labels_from_id(int idx);
 static void update_detail_from_slot(int idx);
 static void handle_mode_button();
 
+static const DataField* getFieldByCombinedIndex(int idx, FieldSource* srcOut = nullptr);
+static int getCombinedFieldCount();
+static int combined_index_of_id(const char* id);
+static const DataField* findFieldForSelectedID(const char* id, FieldSource* srcOut = nullptr);
+
 static void rebuild_latest_json();
 static void append_frame_log(const char* tag, const uint8_t* frame, size_t len);
 static const DataField* find_field_by_name_fragment(const char* needle);
-static bool decode_field_to_text(const DataField* f, char* out, size_t outSize);
 static bool decode_field_to_text_from_frame(const DataField* f, const uint8_t* frame, size_t len, char* out, size_t outSize);
-static void update_readings_from_validated_frame(const uint8_t *frame, size_t len);
-static bool validate_frame_len(size_t len);
-static size_t receive_raw_frame(uint8_t* out, size_t maxLen);
-static size_t normalize_frame_if_needed(const uint8_t* raw, size_t rawLen, uint8_t* normalized, size_t normalizedMax);
+static bool decode_selected_id_to_text(const char* id, char* out, size_t outSize);
+static void update_readings_from_frames();
+static void determineRequiredCommands(bool &needF4, bool &needF5);
 
 #if ENABLE_WIFI_WEB
 static void wifi_init();
@@ -189,6 +150,46 @@ static void handleLog();
 #endif
 
 // ----------------- Helpers -----------------
+static const DataField* getFieldByCombinedIndex(int idx, FieldSource* srcOut)
+{
+  if (idx < 0) return nullptr;
+  if (idx < (int)COMMAND1_FIELD_COUNT) {
+    if (srcOut) *srcOut = FIELD_F4;
+    return &COMMAND1_FIELDS[idx];
+  }
+  idx -= (int)COMMAND1_FIELD_COUNT;
+  if (idx < (int)COMMAND0_FIELD_COUNT) {
+    if (srcOut) *srcOut = FIELD_F5;
+    return &COMMAND0_FIELDS[idx];
+  }
+  if (srcOut) *srcOut = FIELD_NONE;
+  return nullptr;
+}
+
+static int getCombinedFieldCount()
+{
+  return (int)COMMAND1_FIELD_COUNT + (int)COMMAND0_FIELD_COUNT;
+}
+
+static int combined_index_of_id(const char* id)
+{
+  if (!id) return -1;
+  for (int i = 0; i < getCombinedFieldCount(); i++) {
+    const DataField* f = getFieldByCombinedIndex(i, nullptr);
+    if (f && strcmp(id, f->id) == 0) return i;
+  }
+  return -1;
+}
+
+static const DataField* findFieldForSelectedID(const char* id, FieldSource* srcOut)
+{
+  FieldSource src = getFieldSourceByID(id);
+  if (srcOut) *srcOut = src;
+  if (src == FIELD_F4) return findFieldByID(id, COMMAND1_FIELDS, COMMAND1_FIELD_COUNT);
+  if (src == FIELD_F5) return findFieldByID(id, COMMAND0_FIELDS, COMMAND0_FIELD_COUNT);
+  return nullptr;
+}
+
 static lv_coord_t symbol_gap_px_for_font(const lv_font_t* vf)
 {
   int h = vf ? (int)lv_font_get_line_height(vf) : 28;
@@ -205,20 +206,12 @@ static void set_row_gap_by_value_label(lv_obj_t* row, lv_obj_t* value_label)
   lv_obj_set_style_pad_column(row, symbol_gap_px_for_font(vf), 0);
 }
 
-static int cmdf4_index_of_id(const char* id)
-{
-  if (!id) return -1;
-  for (size_t i = 0; i < COMMAND1_FIELD_COUNT; i++) {
-    if (strcmp(id, COMMAND1_FIELDS[i].id) == 0) return (int)i;
-  }
-  return -1;
-}
-
 static void update_slot_labels_from_id(int idx)
 {
   if (idx < 0 || idx >= kSlotCount) return;
   const char* id = idStore.getID(idx);
-  const DataField* f = (const DataField*)findFieldByID(id, COMMAND1_FIELDS, COMMAND1_FIELD_COUNT);
+  FieldSource src = FIELD_NONE;
+  const DataField* f = findFieldForSelectedID(id, &src);
 
   const char* name = (f && f->name) ? f->name : (id ? id : "-");
   const char* sym  = (f && f->symbol && f->symbol[0]) ? f->symbol : "";
@@ -237,9 +230,6 @@ static void update_slot_labels_from_id(int idx)
     if (!sym || sym[0] == '\0') lv_obj_add_flag(list_symbol_lbl[idx], LV_OBJ_FLAG_HIDDEN);
     else                        lv_obj_clear_flag(list_symbol_lbl[idx], LV_OBJ_FLAG_HIDDEN);
   }
-
-  //if (valueRows[idx] && tileValues[idx]) set_row_gap_by_value_label(valueRows[idx], tileValues[idx]);
-  //if (list_value_row[idx] && list_value_lbl[idx]) set_row_gap_by_value_label(list_value_row[idx], list_value_lbl[idx]);
 }
 
 static void update_detail_from_slot(int idx)
@@ -247,7 +237,7 @@ static void update_detail_from_slot(int idx)
   if (!detail_name || !detail_value || !detail_symbol || !detail_value_row) return;
 
   const char* id = idStore.getID(idx);
-  const DataField* f = (const DataField*)findFieldByID(id, COMMAND1_FIELDS, COMMAND1_FIELD_COUNT);
+  const DataField* f = findFieldForSelectedID(id, nullptr);
 
   const char* name = (f && f->name) ? f->name : (id ? id : "-");
   const char* sym  = (f && f->symbol && f->symbol[0]) ? f->symbol : "";
@@ -261,8 +251,6 @@ static void update_detail_from_slot(int idx)
   if (!sym || sym[0] == '\0') lv_obj_add_flag(detail_symbol, LV_OBJ_FLAG_HIDDEN);
   else                        lv_obj_clear_flag(detail_symbol, LV_OBJ_FLAG_HIDDEN);
 
-  //set_row_gap_by_value_label(detail_value_row, detail_value);
-
   lv_obj_set_style_text_color(detail_name,   lv_color_hex(TILE_ACCENT_HEX[idx]), 0);
   lv_obj_set_style_text_color(detail_symbol, lv_color_hex(TILE_ACCENT_HEX[idx]), 0);
   lv_obj_set_style_text_color(detail_value,  lv_color_hex(TILE_VALUE_HEX[idx]),  0);
@@ -271,13 +259,15 @@ static void update_detail_from_slot(int idx)
 static void advance_saved_field(int slot_idx)
 {
   const char* cur_id = idStore.getID(slot_idx);
-  int cur = cmdf4_index_of_id(cur_id);
+  int cur = combined_index_of_id(cur_id);
 
   int next = (cur < 0) ? 0 : (cur + 1);
-  if (next >= (int)COMMAND1_FIELD_COUNT) next = 0;
+  if (next >= getCombinedFieldCount()) next = 0;
 
-  const DataField &f = COMMAND1_FIELDS[next];
-  idStore.setID(slot_idx, f.id);
+  const DataField* f = getFieldByCombinedIndex(next, nullptr);
+  if (!f) return;
+
+  idStore.setID(slot_idx, f->id);
   idStore.save();
 
   update_slot_labels_from_id(slot_idx);
@@ -285,13 +275,8 @@ static void advance_saved_field(int slot_idx)
   if (tileValues[slot_idx]) lv_label_set_text(tileValues[slot_idx], "--");
   if (list_value_lbl[slot_idx]) lv_label_set_text(list_value_lbl[slot_idx], "--");
 
-  if (valueRows[slot_idx]) {
-    lv_obj_update_layout(valueRows[slot_idx]);
-    lv_obj_align(valueRows[slot_idx], LV_ALIGN_CENTER, 0, 14);
-  }
-
-  if (haveValidFrame) {
-    update_readings_from_validated_frame(latestFrame, latestFrameLen);
+  if (haveValidFrameF4 || haveValidFrameF5) {
+    update_readings_from_frames();
   }
 
   if (selected_slot == slot_idx && layout_mode == LAYOUT_LIST_DETAIL) {
@@ -336,44 +321,6 @@ static void list_item_event_cb(lv_event_t *e)
 }
 
 // ----------------- Latest data builders -----------------
-static void update_latest_frame_buffers(const uint8_t* frame, size_t len)
-{
-  if (!frame || len != FRAME_VALID_LEN) return;
-
-  memcpy(latestFrame, frame, FRAME_VALID_LEN);
-  latestFrameLen = FRAME_VALID_LEN;
-  latestFrameMillis = millis();
-  haveValidFrame = true;
-
-  size_t pos = 0;
-  latestFrameHex[0] = '\0';
-  for (size_t i = 0; i < FRAME_VALID_LEN; i++) {
-    int written = snprintf(&latestFrameHex[pos], sizeof(latestFrameHex) - pos,
-                           (i + 1 < FRAME_VALID_LEN) ? "%02X " : "%02X", frame[i]);
-    if (written <= 0) break;
-    pos += (size_t)written;
-    if (pos >= sizeof(latestFrameHex) - 1) break;
-  }
-}
-
-static void update_last_good_frame_buffers(const uint8_t* frame, size_t len)
-{
-  if (!frame || len != FRAME_VALID_LEN) return;
-
-  memcpy(lastGoodRaw64, frame, FRAME_VALID_LEN);
-  lastGoodFrameMillis = millis();
-
-  size_t pos = 0;
-  lastGoodRaw64Hex[0] = '\0';
-  for (size_t i = 0; i < FRAME_VALID_LEN; i++) {
-    int written = snprintf(&lastGoodRaw64Hex[pos], sizeof(lastGoodRaw64Hex) - pos,
-                           (i + 1 < FRAME_VALID_LEN) ? "%02X " : "%02X", frame[i]);
-    if (written <= 0) break;
-    pos += (size_t)written;
-    if (pos >= sizeof(lastGoodRaw64Hex) - 1) break;
-  }
-}
-
 static void update_latest_raw_frame_buffers(const uint8_t* frame, size_t len)
 {
   if (!frame) return;
@@ -396,7 +343,6 @@ static void update_latest_raw_frame_buffers(const uint8_t* frame, size_t len)
 static void append_frame_log(const char* tag, const uint8_t* frame, size_t len)
 {
   size_t slot = frameLogHead % FRAME_LOG_CAPACITY;
-
   char hexbuf[FRAME_MAX_LEN * 3 + 1];
   hexbuf[0] = '\0';
   size_t pos = 0;
@@ -436,62 +382,53 @@ static bool decode_field_to_text_from_frame(const DataField* f, const uint8_t* f
   if (!f || !frame || len == 0) return false;
 
   if (strcmp(f->id, "CMDF4_MPG") == 0) {
-  const DataField* mphF = findFieldByID("CMDF4_MPH", COMMAND1_FIELDS, COMMAND1_FIELD_COUNT);
-  const DataField* bpwF = findFieldByID("CMDF4_BPW", COMMAND1_FIELDS, COMMAND1_FIELD_COUNT);
-  const DataField* rpmF = findFieldByID("CMDF4_ENGINE_SPEED", COMMAND1_FIELDS, COMMAND1_FIELD_COUNT);
+    const DataField* mphF = findFieldByID("CMDF4_MPH", COMMAND1_FIELDS, COMMAND1_FIELD_COUNT);
+    const DataField* bpwF = findFieldByID("CMDF4_BPW", COMMAND1_FIELDS, COMMAND1_FIELD_COUNT);
+    const DataField* rpmF = findFieldByID("CMDF4_ENGINE_SPEED", COMMAND1_FIELDS, COMMAND1_FIELD_COUNT);
 
-  if (!mphF || !bpwF || !rpmF) return false;
+    if (!mphF || !bpwF || !rpmF) return false;
 
-  char mphBuf[24], bpwBuf[24], rpmBuf[24];
-  if (!decode_field_to_text_from_frame(mphF, frame, len, mphBuf, sizeof(mphBuf))) return false;
-  if (!decode_field_to_text_from_frame(bpwF, frame, len, bpwBuf, sizeof(bpwBuf))) return false;
-  if (!decode_field_to_text_from_frame(rpmF, frame, len, rpmBuf, sizeof(rpmBuf))) return false;
+    char mphBuf[24], bpwBuf[24], rpmBuf[24];
+    if (!decode_field_to_text_from_frame(mphF, frame, len, mphBuf, sizeof(mphBuf))) return false;
+    if (!decode_field_to_text_from_frame(bpwF, frame, len, bpwBuf, sizeof(bpwBuf))) return false;
+    if (!decode_field_to_text_from_frame(rpmF, frame, len, rpmBuf, sizeof(rpmBuf))) return false;
 
-  float mph = atof(mphBuf);
-  float bpw = atof(bpwBuf);   // milliseconds
-  float rpm = atof(rpmBuf);
+    float mph = atof(mphBuf);
+    float bpw = atof(bpwBuf);
+    float rpm = atof(rpmBuf);
 
-  if (mph < 1.0f || bpw <= 0.0f || rpm <= 0.0f) {
-    snprintf(out, outSize, "0.0");
+    if (mph < 1.0f || bpw <= 0.0f || rpm <= 0.0f) {
+      snprintf(out, outSize, "0.0");
+      return true;
+    }
+
+    float mpg = mph / (0.0006148f * rpm * bpw);
+    if (mpg < 0.0f) mpg = 0.0f;
+    if (mpg > 99.9f) mpg = 99.9f;
+
+    snprintf(out, outSize, "%.1f", (double)mpg);
     return true;
   }
 
-  // Simple starting estimate for TBI/TPI style GM ECM data.
-  // This constant will likely need tuning to your truck.
-  const float K = 11250.0f;
+  if (strcmp(f->id, "CMDF4_AFR_EST") == 0) {
+    const DataField* o2F = findFieldByID("CMDF4_O2_SENSOR", COMMAND1_FIELDS, COMMAND1_FIELD_COUNT);
+    if (!o2F) return false;
 
-  float mpg = mph / (0.0006148f * rpm * bpw);
-  //mpg *= 0.80f;
+    char o2Buf[24];
+    if (!decode_field_to_text_from_frame(o2F, frame, len, o2Buf, sizeof(o2Buf))) return false;
 
-  if (mpg < 0.0f) mpg = 0.0f;
-  if (mpg > 99.9f) mpg = 99.9f;
+    float mv = atof(o2Buf);
+    float afr = 14.7f - ((mv - 450.0f) / 100.0f) * 0.25f;
 
-  snprintf(out, outSize, "%.1f", (double)mpg);
-  return true;
-}
+    if (afr < 13.0f) afr = 13.0f;
+    if (afr > 16.0f) afr = 16.0f;
 
-if (strcmp(f->id, "CMDF4_AFR_EST") == 0) {
-  const DataField* o2F = findFieldByID("CMDF4_O2_SENSOR", COMMAND1_FIELDS, COMMAND1_FIELD_COUNT);
-  if (!o2F) return false;
+    snprintf(out, outSize, "%.1f", (double)afr);
+    return true;
+  }
 
-  char o2Buf[24];
-  if (!decode_field_to_text_from_frame(o2F, frame, len, o2Buf, sizeof(o2Buf))) return false;
-
-  float mv = atof(o2Buf);
-
-  float afr = 14.7f - ((mv - 450.0f) / 100.0f) * 0.25f;
-
-  if (afr < 13.0f) afr = 13.0f;
-  if (afr > 16.0f) afr = 16.0f;
-
-  snprintf(out, outSize, "%.1f", (double)afr);
-  return true;
-}
-
-  // ADS btByteNumber is 1-based position, convert to 0-based array index
   if (f->adsByteNumber <= 0) return false;
   size_t idx = (size_t)(f->adsByteNumber - 1);
-
   size_t need = idx + (size_t)f->size;
   if (need > len) return false;
 
@@ -510,14 +447,23 @@ if (strcmp(f->id, "CMDF4_AFR_EST") == 0) {
   return true;
 }
 
-static bool decode_field_to_text(const DataField* f, char* out, size_t outSize)
+static bool decode_selected_id_to_text(const char* id, char* out, size_t outSize)
 {
-  if (!haveValidFrame) {
-    if (out && outSize) strncpy(out, "--", outSize);
-    if (out && outSize) out[outSize - 1] = '\0';
-    return false;
+  if (!out || outSize == 0) return false;
+  out[0] = '\0';
+  FieldSource src = FIELD_NONE;
+  const DataField* f = findFieldForSelectedID(id, &src);
+  if (!f) return false;
+
+  if (src == FIELD_F4) {
+    if (!haveValidFrameF4) return false;
+    return decode_field_to_text_from_frame(f, latestFrameF4, latestFrameF4Len, out, outSize);
   }
-  return decode_field_to_text_from_frame(f, latestFrame, latestFrameLen, out, outSize);
+  if (src == FIELD_F5) {
+    if (!haveValidFrameF5) return false;
+    return decode_field_to_text_from_frame(f, latestFrameF5, latestFrameF5Len, out, outSize);
+  }
+  return false;
 }
 
 static void rebuild_latest_json()
@@ -534,18 +480,23 @@ static void rebuild_latest_json()
   char battBuf[24] = "--";
   char tempBuf[24] = "--";
 
-  decode_field_to_text(rpmF, rpmBuf, sizeof(rpmBuf));
-  decode_field_to_text(tpsF, tpsBuf, sizeof(tpsBuf));
-  decode_field_to_text(battF, battBuf, sizeof(battBuf));
-  decode_field_to_text(tempF, tempBuf, sizeof(tempBuf));
+  if (haveValidFrameF4) {
+    decode_field_to_text_from_frame(rpmF, latestFrameF4, latestFrameF4Len, rpmBuf, sizeof(rpmBuf));
+    decode_field_to_text_from_frame(tpsF, latestFrameF4, latestFrameF4Len, tpsBuf, sizeof(tpsBuf));
+    decode_field_to_text_from_frame(battF, latestFrameF4, latestFrameF4Len, battBuf, sizeof(battBuf));
+    decode_field_to_text_from_frame(tempF, latestFrameF4, latestFrameF4Len, tempBuf, sizeof(tempBuf));
+  }
 
   size_t pos = 0;
   int n = snprintf(latestJson + pos, sizeof(latestJson) - pos,
-                 "{\"ms\":%lu,\"selected_slot\":%d,\"valid\":%s,"
+                 "{\"ms_f4\":%lu,\"ms_f5\":%lu,\"selected_slot\":%d,"
+                 "\"f4_valid\":%s,\"f5_valid\":%s,"
                  "\"anchors\":{\"RPM\":\"%s\",\"TPS\":\"%s\",\"Batt\":\"%s\",\"Temp\":\"%s\"},\"slots\":[",
-                 (unsigned long)latestFrameMillis,
+                 (unsigned long)latestFrameF4Millis,
+                 (unsigned long)latestFrameF5Millis,
                  selected_slot,
-                 haveValidFrame ? "true" : "false",
+                 haveValidFrameF4 ? "true" : "false",
+                 haveValidFrameF5 ? "true" : "false",
                  rpmBuf, tpsBuf, battBuf, tempBuf);
   if (n < 0) return;
   pos += (size_t)n;
@@ -556,17 +507,19 @@ static void rebuild_latest_json()
 
   for (int i = 0; i < kSlotCount; i++) {
     const char* id = idStore.getID(i);
-    const DataField* f = (const DataField*)findFieldByID(id, COMMAND1_FIELDS, COMMAND1_FIELD_COUNT);
+    FieldSource src = FIELD_NONE;
+    const DataField* f = findFieldForSelectedID(id, &src);
     const char* name = (f && f->name) ? f->name : "-";
     const char* symbol = (f && f->symbol) ? f->symbol : "";
 
     char valueBuf[24] = "--";
-    decode_field_to_text(f, valueBuf, sizeof(valueBuf));
+    decode_selected_id_to_text(id, valueBuf, sizeof(valueBuf));
 
+    const char* srcName = (src == FIELD_F4) ? "F4" : ((src == FIELD_F5) ? "F5" : "?");
     n = snprintf(latestJson + pos, sizeof(latestJson) - pos,
-                 "%s{\"slot\":%d,\"name\":\"%s\",\"value\":\"%s\",\"symbol\":\"%s\"}",
+                 "%s{\"slot\":%d,\"name\":\"%s\",\"value\":\"%s\",\"symbol\":\"%s\",\"src\":\"%s\"}",
                  (i == 0) ? "" : ",",
-                 i, name, valueBuf, symbol);
+                 i, name, valueBuf, symbol, srcName);
     if (n < 0) return;
     pos += (size_t)n;
     if (pos >= sizeof(latestJson)) {
@@ -576,27 +529,30 @@ static void rebuild_latest_json()
   }
 
   n = snprintf(latestJson + pos, sizeof(latestJson) - pos,
-               "],\"raw\":\"%s\",\"raw_len\":%u,"
-               "\"last_rx_raw\":\"%s\",\"last_rx_len\":%u,"
-               "\"good_frames\":%lu,\"bad_len\":%lu,\"bad63\":%lu,\"timeouts\":%lu,"
-               "\"normalized67\":%lu,\"last_rejected_len\":%u,\"log_count\":%u}",
-               haveValidFrame ? lastGoodRaw64Hex : "",
-               haveValidFrame ? (unsigned)FRAME_VALID_LEN : 0,
+               "],\"last_rx_raw\":\"%s\",\"last_rx_len\":%u,"
+               "\"good_f4\":%lu,\"good_f5\":%lu,"
+               "\"bad_f4\":%lu,\"bad_f5\":%lu,"
+               "\"timeouts_f4\":%lu,\"timeouts_f5\":%lu,"
+               "\"norm67_f4\":%lu,\"norm68_f5\":%lu,"
+               "\"last_rejected_f4\":%u,\"last_rejected_f5\":%u,\"log_count\":%u}",
                latestRawFrameHex,
                (unsigned)latestRawFrameLen,
-               (unsigned long)goodFrameCount,
-               (unsigned long)badLengthCount,
-               (unsigned long)bad63Count,
-               (unsigned long)timeoutCount,
-               (unsigned long)normalized67Count,
-               (unsigned)lastRejectedLength,
+               (unsigned long)goodFrameCountF4,
+               (unsigned long)goodFrameCountF5,
+               (unsigned long)badLengthCountF4,
+               (unsigned long)badLengthCountF5,
+               (unsigned long)timeoutCountF4,
+               (unsigned long)timeoutCountF5,
+               (unsigned long)normalized67CountF4,
+               (unsigned long)normalized68CountF5,
+               (unsigned)lastRejectedLengthF4,
+               (unsigned)lastRejectedLengthF5,
                (unsigned)frameLogCount);
   if (n < 0) return;
   if ((size_t)n >= sizeof(latestJson) - pos) latestJson[sizeof(latestJson) - 1] = '\0';
 }
 
 #if ENABLE_WIFI_WEB
-// ----------------- Web server -----------------
 static void handleRoot()
 {
   const char html[] PROGMEM = R"rawliteral(
@@ -624,7 +580,6 @@ static void handleRoot()
     <div id="anchors">waiting...</div>
   </div>
   <div class="card"><div class="small">Live data from /json</div><div id="slots">waiting...</div></div>
-  <div class="card"><div class="small">Latest validated raw 64-byte F4 frame</div><div id="raw" class="raw">waiting...</div></div>
   <div class="card"><div class="small">Most recent receive attempt</div><div id="lastrx" class="raw">waiting...</div></div>
   <div class="card"><div class="small">Frame log</div><div><a href="/log" target="_blank">Open last 50 receive attempts</a></div></div>
   <script>
@@ -638,14 +593,13 @@ static void handleRoot()
           <div class="row"><div class="name">TPS</div><div class="val">${a.TPS || '--'}</div></div>
           <div class="row"><div class="name">Batt</div><div class="val">${a.Batt || '--'}</div></div>
           <div class="row"><div class="name">Temp</div><div class="val">${a.Temp || '--'}</div></div>
-          <div class="row"><div class="name">Stats</div><div class="val">good=${j.good_frames||0} badLen=${j.bad_len||0} bad63=${j.bad63||0} norm67=${j.normalized67||0}</div></div>`;
+          <div class="row"><div class="name">Stats</div><div class="val">goodF4=${j.good_f4||0} goodF5=${j.good_f5||0}</div></div>`;
 
         let html = '';
         for (const s of (j.slots || [])) {
-          html += `<div class="row"><div class="name">${s.name}</div><div class="val">${s.value} ${s.symbol || ''}</div></div>`;
+          html += `<div class="row"><div class="name">[${s.src}] ${s.name}</div><div class="val">${s.value} ${s.symbol || ''}</div></div>`;
         }
         document.getElementById('slots').innerHTML = html || 'no slots';
-        document.getElementById('raw').textContent = `[len=${j.raw_len || 0}] ` + (j.raw || 'no validated frame');
         document.getElementById('lastrx').textContent = `[len=${j.last_rx_len || 0}] ` + (j.last_rx_raw || 'no raw receive yet');
       } catch (e) {
         document.getElementById('anchors').innerHTML = 'error reading /json';
@@ -663,7 +617,7 @@ static void handleRoot()
 
 static void handleData()
 {
-  server.send(200, "text/plain", haveValidFrame ? lastGoodRaw64Hex : "no validated 64-byte frame yet");
+  server.send(200, "text/plain", latestRawFrameHex);
 }
 
 static void handleJson()
@@ -772,8 +726,8 @@ static void build_ui()
     update_detail_from_slot(selected_slot);
   }
 
-  if (haveValidFrame) {
-    update_readings_from_validated_frame(latestFrame, latestFrameLen);
+  if (haveValidFrameF4 || haveValidFrameF5) {
+    update_readings_from_frames();
   }
 }
 
@@ -792,7 +746,7 @@ static void build_ui_tiles()
   for (int i = 0; i < kSlotCount; i++) {
     lv_obj_t *tile = lv_obj_create(scr);
     tiles[i] = tile;
-    valueRows[i] = nullptr;  // no shared value/symbol row in tile layout now
+    valueRows[i] = nullptr;
 
     lv_obj_add_event_cb(tile, tile_event_cb, LV_EVENT_CLICKED, (void*)(intptr_t)i);
     lv_obj_clear_flag(tile, LV_OBJ_FLAG_SCROLLABLE);
@@ -868,7 +822,6 @@ static void build_ui_tiles()
     update_slot_labels_from_id(i);
   }
 }
-
 
 static void build_ui_list_detail()
 {
@@ -978,7 +931,6 @@ static void build_ui_list_detail()
     lv_obj_align_to(list_symbol_lbl[i], list_value_lbl[i], LV_ALIGN_OUT_RIGHT_MID, 2, 0);
 
     update_slot_labels_from_id(i);
-    //set_row_gap_by_value_label(list_value_row[i], list_value_lbl[i]);
   }
 
   detail_name = lv_label_create(detail_col);
@@ -1084,7 +1036,6 @@ static void bitBangSendByte(uint8_t b)
 
 static inline void sendCommandF4()
 {
-  // Keep the currently used request bytes from your working sketch
   bitBangSendByte(0xF4);
   bitBangSendByte(0x57);
   bitBangSendByte(0x01);
@@ -1092,16 +1043,13 @@ static inline void sendCommandF4()
   bitBangSendByte(0xB4);
 }
 
-static bool validate_frame_len(size_t len)
+static inline void sendCommandF5()
 {
-  if (len == FRAME_VALID_LEN) return true;
-
-  if (len == 63) bad63Count++;
-  else if (len == 0) timeoutCount++;
-  else badLengthCount++;
-
-  lastRejectedLength = len;
-  return false;
+  bitBangSendByte(0xF5);
+  bitBangSendByte(0x57);
+  bitBangSendByte(0x01);
+  bitBangSendByte(0x00);
+  bitBangSendByte(0xB3);
 }
 
 static size_t receive_raw_frame(uint8_t* out, size_t maxLen)
@@ -1109,8 +1057,6 @@ static size_t receive_raw_frame(uint8_t* out, size_t maxLen)
   if (!out || maxLen == 0) return 0;
 
   memset(out, 0, maxLen);
-
-  // confirmed theory: response starts roughly 40 ms after request
   delay(ALDL_RESPONSE_DELAY_MS);
 
   size_t n = 0;
@@ -1136,33 +1082,52 @@ static size_t receive_raw_frame(uint8_t* out, size_t maxLen)
   return n;
 }
 
-
-static size_t normalize_frame_if_needed(const uint8_t* raw, size_t rawLen, uint8_t* normalized, size_t normalizedMax)
+static size_t normalize_frame_if_needed(FieldSource src, const uint8_t* raw, size_t rawLen, uint8_t* normalized, size_t normalizedMax)
 {
-  if (!raw || !normalized || normalizedMax < FRAME_VALID_LEN) return 0;
+  if (!raw || !normalized) return 0;
 
-  if (rawLen == FRAME_VALID_LEN) {
-    memcpy(normalized, raw, FRAME_VALID_LEN);
-    return FRAME_VALID_LEN;
+  const size_t expect = (src == FIELD_F4) ? F4_VALID_LEN : F5_VALID_LEN;
+  if (normalizedMax < expect) return 0;
+
+  if (rawLen == expect) {
+    memcpy(normalized, raw, expect);
+    return expect;
   }
 
-  // Current truck testing suggests some receives come in as 67 bytes:
-  // 3 extra leading bytes followed by the real 64-byte frame.
-  if (rawLen == 67) {
-    memcpy(normalized, raw + 3, FRAME_VALID_LEN);
-    normalized67Count++;
-    Serial.printf("ALDL len67 normalized -> 64 by skipping first 3 bytes: %02X %02X %02X\n",
-                  raw[0], raw[1], raw[2]);
-    return FRAME_VALID_LEN;
+  if (src == FIELD_F4 && rawLen == 67) {
+    memcpy(normalized, raw + 3, F4_VALID_LEN);
+    normalized67CountF4++;
+    return F4_VALID_LEN;
+  }
+
+  if (src == FIELD_F5 && rawLen == 68) {
+    memcpy(normalized, raw + 3, F5_VALID_LEN);
+    normalized68CountF5++;
+    return F5_VALID_LEN;
+  }
+
+  if (src == FIELD_F5 && rawLen == 70) {
+    memcpy(normalized, raw + 5, F5_VALID_LEN);
+    return F5_VALID_LEN;
   }
 
   return rawLen;
 }
 
-static void update_readings_from_validated_frame(const uint8_t *frame, size_t len)
+static void determineRequiredCommands(bool &needF4, bool &needF5)
 {
-  if (!frame || len != FRAME_VALID_LEN) return;
+  needF4 = false;
+  needF5 = false;
 
+  for (int i = 0; i < kSlotCount; i++) {
+    FieldSource src = getFieldSourceByID(idStore.getID(i));
+    if (src == FIELD_F4) needF4 = true;
+    else if (src == FIELD_F5) needF5 = true;
+  }
+}
+
+static void update_readings_from_frames()
+{
   static uint32_t last_ui_ms = 0;
   uint32_t now = millis();
   if (now - last_ui_ms < 80) return;
@@ -1173,14 +1138,8 @@ static void update_readings_from_validated_frame(const uint8_t *frame, size_t le
 
   for (int i = 0; i < kSlotCount; i++) {
     const char* id = idStore.getID(i);
-    const DataField* f = (const DataField*)findFieldByID(id, COMMAND1_FIELDS, COMMAND1_FIELD_COUNT);
-    if (!f) continue;
 
-    bool usedOverride = false;
-
-    if (!usedOverride) {
-      if (!decode_field_to_text_from_frame(f, frame, len, buf, sizeof(buf))) continue;
-    }
+    if (!decode_selected_id_to_text(id, buf, sizeof(buf))) continue;
 
     if (tileValues[i]) {
       const char* cur = lv_label_get_text(tileValues[i]);
@@ -1214,8 +1173,88 @@ static void aldl_init()
 
   Serial.printf("ALDL init: bitbang TX=%d OE=%d | UART1 RX=%d EN_RX=%d BAUD=%d\n",
                 ALDL_TX_PIN, TX_OE_PIN, ALDL_RX_PIN, ALDL_EN_RX_PIN, ALDL_BAUD);
-  Serial.printf("ALDL theory: valid=%d bytes, response delay=%d ms, rx window=%d ms\n",
-                FRAME_VALID_LEN, ALDL_RESPONSE_DELAY_MS, ALDL_RX_WINDOW_MS);
+}
+
+
+static void poll_one_command(FieldSource src)
+{
+  aldl_enable_rx(false);
+  while (ALDLSerial.available()) (void)ALDLSerial.read();
+
+  if (src == FIELD_F4) sendCommandF4();
+  else if (src == FIELD_F5) sendCommandF5();
+  else return;
+
+  aldl_enable_rx(true);
+  uint8_t raw[FRAME_MAX_LEN] = {0};
+  size_t rawLen = receive_raw_frame(raw, sizeof(raw));
+
+  if (src == FIELD_F5) {
+    Serial.print("F5 rawLen = ");
+    Serial.println(rawLen);
+    Serial.print("F5 first bytes: ");
+    for (size_t i = 0; i < rawLen && i < 8; i++) {
+      if (raw[i] < 16) Serial.print('0');
+      Serial.print(raw[i], HEX);
+      Serial.print(' ');
+    }
+    Serial.println();
+  }
+
+  aldl_enable_rx(false);
+
+  update_latest_raw_frame_buffers(raw, rawLen);
+
+  uint8_t normalized[FRAME_MAX_LEN] = {0};
+  size_t normLen = normalize_frame_if_needed(src, raw, rawLen, normalized, sizeof(normalized));
+
+  if (!validate_len_for_source(src, normLen)) {
+    append_frame_log((src == FIELD_F4) ? "F4_BAD" : "F5_BAD", raw, rawLen);
+    rebuild_latest_json();
+    return;
+  }
+
+  if (src == FIELD_F4) {
+    memcpy(latestFrameF4, normalized, F4_VALID_LEN);
+    latestFrameF4Len = F4_VALID_LEN;
+    latestFrameF4Millis = millis();
+    haveValidFrameF4 = true;
+    goodFrameCountF4++;
+    append_frame_log((rawLen == 67) ? "F4_GOOD64_FROM67" : "F4_GOOD64", raw, rawLen);
+  } else {
+    memcpy(latestFrameF5, normalized, F5_VALID_LEN);
+    latestFrameF5Len = F5_VALID_LEN;
+    latestFrameF5Millis = millis();
+    haveValidFrameF5 = true;
+    goodFrameCountF5++;
+    append_frame_log(
+      (rawLen == 68) ? "F5_GOOD65_FROM68" :
+      (rawLen == 70) ? "F5_GOOD65_FROM70" :
+                       "F5_GOOD65",
+      raw, rawLen
+    );
+  }
+
+  rebuild_latest_json();
+  update_readings_from_frames();
+}
+
+static bool validate_len_for_source(FieldSource src, size_t len)
+{
+  const size_t expect = (src == FIELD_F4) ? F4_VALID_LEN : F5_VALID_LEN;
+  if (len == expect) return true;
+
+  if (len == 0) {
+    if (src == FIELD_F4) timeoutCountF4++;
+    else if (src == FIELD_F5) timeoutCountF5++;
+  } else {
+    if (src == FIELD_F4) badLengthCountF4++;
+    else if (src == FIELD_F5) badLengthCountF5++;
+  }
+
+  if (src == FIELD_F4) lastRejectedLengthF4 = len;
+  else if (src == FIELD_F5) lastRejectedLengthF5 = len;
+  return false;
 }
 
 static void aldl_poll()
@@ -1225,57 +1264,12 @@ static void aldl_poll()
   if (now - last_poll < ALDL_POLL_MS) return;
   last_poll = now;
 
-  // 1) Flush old UART bytes before sending a new request
-  aldl_enable_rx(false);
-  while (ALDLSerial.available()) (void)ALDLSerial.read();
+  bool needF4 = false, needF5 = false;
+  determineRequiredCommands(needF4, needF5);
 
-  // 2) Send F4 request
-  sendCommandF4();
-
-  // 3) Switch to receive and capture raw wire frame
-  aldl_enable_rx(true);
-  uint8_t raw[FRAME_MAX_LEN] = {0};
-  size_t n = receive_raw_frame(raw, sizeof(raw));
-  aldl_enable_rx(false);
-
-  update_latest_raw_frame_buffers(raw, n);
-
-  // 4) Normalize known-good raw variations before validation
-  uint8_t normalized[FRAME_VALID_LEN] = {0};
-  size_t normalizedLen = normalize_frame_if_needed(raw, n, normalized, sizeof(normalized));
-
-  // 5) Accept only exact 64-byte normalized frames
-  if (!validate_frame_len(normalizedLen)) {
-    append_frame_log((normalizedLen == 63) ? "BAD63" : ((normalizedLen == 0) ? "TIMEOUT" : "BADLEN"), raw, n);
-    rebuild_latest_json();
-    Serial.printf("ALDL rejected rawLen=%u normLen=%u (good=%lu badLen=%lu bad63=%lu timeout=%lu norm67=%lu)\n",
-                  (unsigned)n,
-                  (unsigned)normalizedLen,
-                  (unsigned long)goodFrameCount,
-                  (unsigned long)badLengthCount,
-                  (unsigned long)bad63Count,
-                  (unsigned long)timeoutCount,
-                  (unsigned long)normalized67Count);
-    return;
-  }
-
-  // 6) Keep last good full normalized 64-byte frame
-  goodFrameCount++;
-  update_last_good_frame_buffers(normalized, FRAME_VALID_LEN);
-  update_latest_frame_buffers(normalized, FRAME_VALID_LEN);
-  append_frame_log((n == 67) ? "GOOD64_FROM67" : "GOOD64", raw, n);
-
-  // 7) Decode fields from validated frame
-  rebuild_latest_json();
-
-  // 8) Update UI
-  update_readings_from_validated_frame(normalized, FRAME_VALID_LEN);
-
-  Serial.printf("ALDL good64  t=%lu  rawLen=%u normLen=%u\n",
-              (unsigned long)latestFrameMillis,
-              (unsigned)n,
-              (unsigned)FRAME_VALID_LEN);
-  }
+  if (needF4) poll_one_command(FIELD_F4);
+  if (needF5) poll_one_command(FIELD_F5);
+}
 #endif
 
 // ----------------- Setup / Loop -----------------
@@ -1322,11 +1316,10 @@ void setup()
 
   Serial.printf("Free heap after init: %lu\n", (unsigned long)ESP.getFreeHeap());
   Serial.println("UI built. Tap items to cycle sensors. Press MODE_PIN to toggle layouts.");
-  Serial.println("Important: this sketch accepts exact 64-byte frames, and also normalizes 67-byte receives by skipping the first 3 bytes.");
-  Serial.println("Any field offsets inherited from old USB/header-based ADX assumptions should be rechecked.");
-  #if ENABLE_WIFI_WEB
-    Serial.println("Web AP: SSID=ALDL-Dash PASS=12345678 URL=http://192.168.4.1/");
-  #endif
+  Serial.println("Polling logic now follows the six selected cells:");
+  Serial.println("- only F4 fields selected -> F4 only");
+  Serial.println("- only F5 fields selected -> F5 only");
+  Serial.println("- mixed F4/F5 fields selected -> poll both");
 }
 
 void loop()

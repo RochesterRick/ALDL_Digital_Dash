@@ -20,28 +20,26 @@ struct DataField {
 
 // ----------------- Command 0 (F5) fields -----------------
 const DataField COMMAND0_FIELDS[] = {
-  // ----------- F5 (Transmission / Extended Data) -----------
+  { "CMDF5_COOLANT_TEMP_F",      "Coolant Temp",      "°F",  0x0E, 1, 1.35,     -40.0, 0 },
+  { "CMDF5_RPM",                 "RPM",               "RPM", 0x14, 2, 0.125,      0.0, 0 },
+  { "CMDF5_BATTERY_VOLT",        "Battery Voltage",   "V",   0x0F, 1, 0.1,        0.0, 1 },
+  { "CMDF5_GEAR_POSITION",       "Gear Position",     "G",   0x25, 1, 1.0,        1.0, 0 },
+  { "CMDF5_MPH",                 "MPH",               "MPH", 0x23, 1, 0.5,        0.0, 0 },
+  { "CMDF5_TORQUE_PRESSURE",     "Torque Pressure",   "PSI", 0x1B, 1, 1.0,        0.0, 0 },
+  { "CMDF5_SHIFT1_2",            "Shift1-2",          "s",   0x2F, 1, 0.025,      0.0, 2 },
+  { "CMDF5_SHIFT2_3",            "Shift2-3",          "s",   0x30, 1, 0.025,      0.0, 2 },
+  { "CMDF5_TPS",                 "TPS",               "%",   0x12, 1, 0.392157,   0.0, 0 },
+  { "CMDF5_BAROMETRIC",          "Barometric",        "kPa", 0x13, 1, 0.369,     10.354, 1 },
 
-{ "CMDF5_TRANS_INPUT_SPEED",   "Trans Input",      "RPM", 0x16, 2, 0.125,   0.0, 0 },
-{ "CMDF5_TURBINE_SPEED",       "Turbine Speed",    "RPM", 0x18, 2, 0.125,   0.0, 0 },
-
-{ "CMDF5_TORQUE_PRESSURE",     "Torque Pressure",  "PSI", 0x1B, 1, 1.0,     0.0, 0 },
-
-{ "CMDF5_FORCE_MOTOR_DC",      "Force Motor",      "%",   0x1E, 1, 0.392157, 0.0, 0 },
-{ "CMDF5_TCC_PWM",             "TCC PWM",          "%",   0x21, 1, 0.392157, 0.0, 0 },
-
-{ "CMDF5_SPEED_RATIO",         "Speed Ratio",      "",    0x23, 1, 0.01,    0.0, 2 },
-
-{ "CMDF5_GEAR",                "Gear",             "G",   0x25, 1, 1.0,     1.0, 0 },
-
-{ "CMDF5_SLIP",                "Slip",             "RPM", 0x2D, 1, 1.0,     0.0, 0 },
-
-{ "CMDF5_SHIFT_1_2_TIME",      "Shift 1-2",        "s",   0x2F, 1, 0.025,   0.0, 2 },
-{ "CMDF5_SHIFT_2_3_TIME",      "Shift 2-3",        "s",   0x30, 1, 0.025,   0.0, 2 },
-
-{ "CMDF5_OUTPUT_SPEED",        "Output Speed",     "RPM", 0x3C, 2, 0.125,   0.0, 0 },
-
-{ "CMDF5_TRANS_TEMP_F",        "Trans Temp",       "°F",  0x40, 1, 1.35,  -40.0, 0 },
+  { "CMDF5_TRANS_INPUT_SPEED",   "Trans Input",       "RPM", 0x16, 2, 0.125,      0.0, 0 },
+  { "CMDF5_TURBINE_SPEED",       "Turbine Speed",     "RPM", 0x18, 2, 0.125,      0.0, 0 },
+  { "CMDF5_FORCE_MOTOR_DC",      "Force Motor",       "%",   0x1E, 1, 0.392157,   0.0, 0 },
+  { "CMDF5_TCC_PWM",             "TCC PWM",           "%",   0x21, 1, 0.392157,   0.0, 0 },
+  { "CMDF5_SPEED_RATIO",         "Speed Ratio",       "",    0x23, 1, 0.01,       0.0, 2 },
+  { "CMDF5_GEAR",                "Gear",              "G",   0x25, 1, 1.0,        1.0, 0 },
+  { "CMDF5_SLIP",                "Slip",              "RPM", 0x2D, 1, 1.0,        0.0, 0 },
+  { "CMDF5_OUTPUT_SPEED",        "Output Speed",      "RPM", 0x3C, 2, 0.125,      0.0, 0 },
+  { "CMDF5_TRANS_TEMP_F",        "Trans Temp",        "°F",  0x40, 1, 1.35,     -40.0, 0 },
 };
 
 const size_t COMMAND0_FIELD_COUNT = sizeof(COMMAND0_FIELDS) / sizeof(COMMAND0_FIELDS[0]);
@@ -77,7 +75,7 @@ const DataField COMMAND1_FIELDS[] = {
 
   { "CMDF4_BARO_VOLTAGE",         "Baro Voltage",     "V",    27,  1, 0.019608,  0.0,      2 },
   { "CMDF4_BARO_KPA",             "Barometric",       "kPa",  27,  1, 0.369,    10.354,    1 },
-  { "CMDF4_BARO",                 "Baro",             "inHg", 27,  1, 0.2953f,   0.0f,     1 },
+  { "CMDF4_BARO",                 "Barometric",       "Hg",   27,  1, 0.2953f,   0.0f,     1 },
 
   { "CMDF4_MPH",                  "Veh Speed",        "MPH",  31,  1, 1.0,       0.0,      0 },
 
@@ -88,22 +86,21 @@ const DataField COMMAND1_FIELDS[] = {
 
   { "CMDF4_EGR_DUTY",             "EGR Cycle",        "%",    37,  1, 0.392157,  0.0,      0 },
 
-  { "CMDF4_ENGINE_RUN_TIME",      "Engine Time",      "s",    39,  2, 1.0,       0.0,      0 }, 
+  { "CMDF4_ENGINE_RUN_TIME",      "Engine Time",      "s",    39,  2, 1.0,       0.0,      0 },
 
   { "CMDF4_SPARK_ADVANCE",        "Spark Advance",    "°",    45,  2, 0.351563,  0.0,      0 },
 
   { "CMDF4_KNOCK_COUNTER",        "Knock Counter",    "ct",   47,  1, 1.0,       0.0,      0 },
 
-  { "CMDF4_INT",                  "INT",              "",     49,  1, 1.0,       0.0,      0 },
-
   { "CMDF4_RICH_LEAN_TRANS",      "Rich/Lean Trans",  "",     51,  1, 1.0,       0.0,      0 },
 
   { "CMDF4_BLM_CELL",             "BLM Cell",         "",     54,  1, 1.0,       0.0,      0 },
   { "CMDF4_BLM",                  "BLM",              "",     55,  1, 1.0,       0.0,      0 },
+  { "CMDF4_INT",                  "INT",              "",     49,  1, 1.0,       0.0,      0 },
 
   { "CMDF4_KNOCK_RETARD",         "Knock Retard",     "°",    56,  1, 0.175781,  0.0,      0 },
 
-  { "CMDF4_BPW",                  "Inject BPW",      "ms",    57,  2, 0.015259,  0.0,      2 },
+  { "CMDF4_BPW",                  "Inject BPW",       "ms",   57,  2, 0.015259,  0.0,      2 },
 
   { "CMDF4_ACTUAL_EGR_POSITION",  "Act EGR Pos",      "%",    60,  1, 0.392157,  0.0,      0 },
 
@@ -169,7 +166,7 @@ public:
   }
 
   void setID(int index, const char* id) {
-    if (index < 0 || index >= NUM_IDS) return;
+    if (index < 0 || index >= NUM_IDS || !id) return;
     strncpy(settings.ids[index], id, MAX_ID_LENGTH);
     settings.ids[index][MAX_ID_LENGTH] = '\0';
   }
@@ -199,14 +196,34 @@ private:
 };
 
 
-// ----------------- Field lookup helper -----------------
+// ----------------- Field lookup helpers -----------------
 inline DataField* findFieldByID(const char* id, const DataField* list, size_t count) {
+  if (!id) return nullptr;
   for (size_t i = 0; i < count; i++) {
     if (strcmp(id, list[i].id) == 0) {
       return (DataField*)&list[i];
     }
   }
   return nullptr;
+}
+
+inline DataField* findFieldByIDAny(const char* id) {
+  DataField* f = findFieldByID(id, COMMAND1_FIELDS, COMMAND1_FIELD_COUNT);
+  if (f) return f;
+  return findFieldByID(id, COMMAND0_FIELDS, COMMAND0_FIELD_COUNT);
+}
+
+enum FieldSource : uint8_t {
+  FIELD_NONE = 0,
+  FIELD_F5   = 5,
+  FIELD_F4   = 4
+};
+
+inline FieldSource getFieldSourceByID(const char* id) {
+  if (!id) return FIELD_NONE;
+  if (findFieldByID(id, COMMAND1_FIELDS, COMMAND1_FIELD_COUNT)) return FIELD_F4;
+  if (findFieldByID(id, COMMAND0_FIELDS, COMMAND0_FIELD_COUNT)) return FIELD_F5;
+  return FIELD_NONE;
 }
 
 #endif // ALDL_CORE_H
