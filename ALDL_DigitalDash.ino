@@ -48,6 +48,8 @@ Board profile:
 
 // ----------------- ALDL pins (bit-bang TX + UART RX) -----------------
 #define ENABLE_ALDL 1
+//#define ALDL_RX_PIN     17
+//#define ALDL_TX_PIN     18
 #define ALDL_RX_PIN     17
 #define ALDL_TX_PIN     18
 #define ALDL_EN_RX_PIN  11
