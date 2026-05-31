@@ -734,8 +734,8 @@ static void build_ui()
 static void build_ui_tiles()
 {
   lv_obj_t *scr = lv_scr_act();
-  static lv_coord_t col_dsc[] = { LV_GRID_FR(1), LV_GRID_FR(1), LV_GRID_FR(1), LV_GRID_TEMPLATE_LAST };
-  static lv_coord_t row_dsc[] = { LV_GRID_FR(1), LV_GRID_FR(1), LV_GRID_TEMPLATE_LAST };
+  static lv_coord_t col_dsc[] = { LV_GRID_FR(1), LV_GRID_FR(1), LV_GRID_TEMPLATE_LAST };
+  static lv_coord_t row_dsc[] = { LV_GRID_FR(1), LV_GRID_FR(1), LV_GRID_FR(1), LV_GRID_TEMPLATE_LAST };
 
   lv_obj_set_grid_dsc_array(scr, col_dsc, row_dsc);
   lv_obj_set_layout(scr, LV_LAYOUT_GRID);
@@ -759,8 +759,8 @@ static void build_ui_tiles()
     lv_obj_set_style_bg_opa(tile, LV_OPA_COVER, 0);
     lv_obj_set_style_pad_all(tile, 14, 0);
 
-    int r = (i / 3);
-    int c = (i % 3);
+    int r = (i / 2);
+    int c = (i % 2);
     lv_obj_set_grid_cell(tile, LV_GRID_ALIGN_STRETCH, c, 1, LV_GRID_ALIGN_STRETCH, r, 1);
     #ifdef LV_LAYOUT_NONE
       lv_obj_set_layout(tile, LV_LAYOUT_NONE);
@@ -1297,7 +1297,7 @@ void setup()
   if (bl) bl->on();
 
   lvgl_port_init(board->getLCD(), board->getTouch());
-  lv_disp_set_rotation(lv_disp_get_default(), LV_DISP_ROT_180);
+  lv_disp_set_rotation(lv_disp_get_default(), LV_DISP_ROT_270);  // 90 degrees clockwise from current 180 orientation
   idStore.begin();
 
   lvgl_port_lock(-1);
