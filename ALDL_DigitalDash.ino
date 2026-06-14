@@ -387,6 +387,13 @@ static bool decode_field_to_text_from_frame(const DataField* f, const uint8_t* f
   out[0] = '\0';
   if (!f || !frame || len == 0) return false;
 
+  if (strcmp(f->id, "CMDF5_TCC_LOCK") == 0) {
+    if (len <= 0x1D) return false;
+    bool locked = (frame[0x1D] & 0x40) == 0x40;
+    snprintf(out, outSize, "%s", locked ? "Locked" : "UnLocked");
+    return true;
+  }
+
   if (strcmp(f->id, "CMDF4_MPG") == 0) {
     const DataField* mphF = findFieldByID("CMDF4_MPH", COMMAND1_FIELDS, COMMAND1_FIELD_COUNT);
     const DataField* bpwF = findFieldByID("CMDF4_BPW", COMMAND1_FIELDS, COMMAND1_FIELD_COUNT);

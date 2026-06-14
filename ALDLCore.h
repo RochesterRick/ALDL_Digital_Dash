@@ -20,26 +20,17 @@ struct DataField {
 
 // ----------------- Command 0 (F5) fields -----------------
 const DataField COMMAND0_FIELDS[] = {
-  { "CMDF5_COOLANT_TEMP_F",      "Coolant Temp",      "°F",  0x0E, 1, 1.35,     -40.0, 0 },
-  { "CMDF5_RPM",                 "RPM",               "RPM", 0x14, 2, 0.125,      0.0, 0 },
-  { "CMDF5_BATTERY_VOLT",        "Battery Voltage",   "V",   0x0F, 1, 0.1,        0.0, 1 },
   { "CMDF5_GEAR_POSITION",       "Gear Position",     "G",   0x25, 1, 1.0,        1.0, 0 },
-  { "CMDF5_MPH",                 "MPH",               "MPH", 0x23, 1, 0.5,        0.0, 0 },
   { "CMDF5_TORQUE_PRESSURE",     "Torque Pressure",   "PSI", 0x1B, 1, 1.0,        0.0, 0 },
   { "CMDF5_SHIFT1_2",            "Shift1-2",          "s",   0x2F, 1, 0.025,      0.0, 2 },
   { "CMDF5_SHIFT2_3",            "Shift2-3",          "s",   0x30, 1, 0.025,      0.0, 2 },
-  { "CMDF5_TPS",                 "TPS",               "%",   0x12, 1, 0.392157,   0.0, 0 },
-  { "CMDF5_BAROMETRIC",          "Barometric",        "kPa", 0x13, 1, 0.369,     10.354, 1 },
-
-  { "CMDF5_TRANS_INPUT_SPEED",   "Trans Input",       "RPM", 0x16, 2, 0.125,      0.0, 0 },
-  { "CMDF5_TURBINE_SPEED",       "Turbine Speed",     "RPM", 0x18, 2, 0.125,      0.0, 0 },
-  { "CMDF5_FORCE_MOTOR_DC",      "Force Motor",       "%",   0x1E, 1, 0.392157,   0.0, 0 },
   { "CMDF5_TCC_PWM",             "TCC PWM",           "%",   0x21, 1, 0.392157,   0.0, 0 },
-  { "CMDF5_SPEED_RATIO",         "Speed Ratio",       "",    0x23, 1, 0.01,       0.0, 2 },
-  { "CMDF5_GEAR",                "Gear",              "G",   0x25, 1, 1.0,        1.0, 0 },
-  { "CMDF5_SLIP",                "Slip",              "RPM", 0x2D, 1, 1.0,        0.0, 0 },
-  { "CMDF5_OUTPUT_SPEED",        "Output Speed",      "RPM", 0x3C, 2, 0.125,      0.0, 0 },
+  { "CMDF5_TCC_LOCK",            "TCC-Lock",          "",    0,    0, 1.0,        0.0, 0 },
+  { "CMDF5_SLIP",                "TCC Slip",          "RPM", 0x2D, 1, 1.0,        0.0, 0 },
   { "CMDF5_TRANS_TEMP_F",        "Trans Temp",        "°F",  0x40, 1, 1.35,     -40.0, 0 },
+
+  // Disabled F5 duplicates/diagnostics: engine values, trouble-code flags,
+  // shift/error diagnostics, and unverified solenoid-only status bits.
 };
 
 const size_t COMMAND0_FIELD_COUNT = sizeof(COMMAND0_FIELDS) / sizeof(COMMAND0_FIELDS[0]);
