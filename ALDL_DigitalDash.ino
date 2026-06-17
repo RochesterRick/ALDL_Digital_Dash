@@ -1,10 +1,10 @@
 // ALDL_DigitalDash.ino — JC8048W550C (ESP32-8048S050C) DASH UI + ALDL (F4/F5 fields)
-Rotate ALDL dash display for portrait mounting
+//Rotate ALDL dash display for portrait mounting
 
-- Changed display orientation for 90-degree clockwise mounted screen
-- Changed tile layout from 3 columns x 2 rows to 2 columns x 3 rows
-- Verified on bench and in truck with live ALDL data
-- Touch/display layout appears correct
+//- Changed display orientation for 90-degree clockwise mounted screen
+//- Changed tile layout from 3 columns x 2 rows to 2 columns x 3 rows
+//- Verified on bench and in truck with live ALDL data
+//- Touch/display layout appears correct
 
 #include <Arduino.h>
 #include "esp_display_panel.hpp"
