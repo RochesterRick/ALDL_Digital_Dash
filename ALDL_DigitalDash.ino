@@ -51,6 +51,7 @@
 #define AHT_I2C_FREQ_HZ 100000
 #define AHT_I2C_TIMEOUT_MS 10
 #define AHT_MAX_READ_FAILURES 3
+#define AHT_POLL_INTERVAL_MS 5000
 #define AHT_I2C_ADDR_DEFAULT 0x38
 #define AHT_CMD_CALIBRATE 0xE1
 #define AHT_CMD_TRIGGER 0xAC
@@ -150,6 +151,10 @@ bool ahtPresent = false;
 static uint8_t ahtReadFailureCount = 0;
 static bool ahtReadFailed = false;
 static bool ahtReadFailureReported = false;
+static portMUX_TYPE ahtStateMux = portMUX_INITIALIZER_UNLOCKED;
+static TaskHandle_t ahtTaskHandle = nullptr;
+static volatile bool ahtUiDirty = true;
+static char ahtDisplayText[24] = "---\n---";
 #endif
 
 static char frameLog[FRAME_LOG_CAPACITY][FRAME_MAX_LEN * 3 + 64] = {{0}};
@@ -187,7 +192,8 @@ static void determineRequiredCommands(bool &needF4, bool &needF5);
 static void migrate_legacy_aht_ids();
 static bool aht_is_selected();
 static void aht_init();
-static void aht_update();
+static void aht_start_task();
+static void aht_handle_ui_update();
 #endif
 
 #if ENABLE_WIFI_WEB
@@ -526,17 +532,10 @@ static bool decode_aht_id_to_text(const char* id, char* out, size_t outSize)
 
   if (strcmp(id, AHT_CABIN_ID) != 0) return false;
 
-  if (ahtReadFailed) {
-    snprintf(out, outSize, "ERR\nERR");
-    return true;
-  }
-
-  if (!ahtPresent) {
-    snprintf(out, outSize, "---\n---");
-    return true;
-  }
-
-  snprintf(out, outSize, "%.1f°F\n%.1f%%", (double)externalTempF, (double)externalHumidity);
+  portENTER_CRITICAL(&ahtStateMux);
+  strncpy(out, ahtDisplayText, outSize - 1);
+  out[outSize - 1] = '\0';
+  portEXIT_CRITICAL(&ahtStateMux);
   return true;
 }
 #endif
@@ -1200,13 +1199,9 @@ static void determineRequiredCommands(bool &needF4, bool &needF5)
 
 static void update_readings_from_frames()
 {
-  static uint32_t last_ui_ms = 0;
-  uint32_t now = millis();
-  if (now - last_ui_ms < 80) return;
-  last_ui_ms = now;
-
   lvgl_port_lock(-1);
-  char buf[24];
+  char buf[32];
+  bool changed = false;
 
   for (int i = 0; i < kSlotCount; i++) {
     const char* id = idStore.getID(i);
@@ -1215,21 +1210,72 @@ static void update_readings_from_frames()
 
     if (tileValues[i]) {
       const char* cur = lv_label_get_text(tileValues[i]);
-      if (!cur || strcmp(cur, buf) != 0) lv_label_set_text(tileValues[i], buf);
+      if (!cur || strcmp(cur, buf) != 0) {
+        lv_label_set_text(tileValues[i], buf);
+        changed = true;
+      }
     }
     if (list_value_lbl[i]) {
       const char* cur = lv_label_get_text(list_value_lbl[i]);
-      if (!cur || strcmp(cur, buf) != 0) lv_label_set_text(list_value_lbl[i], buf);
+      if (!cur || strcmp(cur, buf) != 0) {
+        lv_label_set_text(list_value_lbl[i], buf);
+        changed = true;
+      }
     }
   }
 
-  if (selected_slot >= 0 && selected_slot < kSlotCount && layout_mode == LAYOUT_LIST_DETAIL) {
+  if (changed && selected_slot >= 0 && selected_slot < kSlotCount && layout_mode == LAYOUT_LIST_DETAIL) {
     update_detail_from_slot(selected_slot);
   }
 
-  lv_obj_invalidate(lv_scr_act());
   lvgl_port_unlock();
 }
+
+#if ENABLE_AHT
+static void update_cabin_reading_from_state()
+{
+  lvgl_port_lock(-1);
+  char buf[32];
+  bool changed = false;
+
+  if (!decode_aht_id_to_text(AHT_CABIN_ID, buf, sizeof(buf))) {
+    lvgl_port_unlock();
+    return;
+  }
+
+  for (int i = 0; i < kSlotCount; i++) {
+    const char* id = idStore.getID(i);
+    if (!id || strcmp(id, AHT_CABIN_ID) != 0) continue;
+
+    if (tileValues[i]) {
+      const char* cur = lv_label_get_text(tileValues[i]);
+      if (!cur || strcmp(cur, buf) != 0) {
+        lv_label_set_text(tileValues[i], buf);
+        changed = true;
+      }
+    }
+    if (list_value_lbl[i]) {
+      const char* cur = lv_label_get_text(list_value_lbl[i]);
+      if (!cur || strcmp(cur, buf) != 0) {
+        lv_label_set_text(list_value_lbl[i], buf);
+        changed = true;
+      }
+    }
+  }
+
+  if (changed &&
+      selected_slot >= 0 &&
+      selected_slot < kSlotCount &&
+      layout_mode == LAYOUT_LIST_DETAIL) {
+    const char* selectedId = idStore.getID(selected_slot);
+    if (selectedId && strcmp(selectedId, AHT_CABIN_ID) == 0) {
+      update_detail_from_slot(selected_slot);
+    }
+  }
+
+  lvgl_port_unlock();
+}
+#endif
 
 static void aldl_init()
 {
@@ -1546,6 +1592,46 @@ static bool aht_read_sample(float* tempF, float* humidity)
   return true;
 }
 
+static void aht_format_display_text(bool present, bool readFailed, float tempF, float humidity, char* out, size_t outSize)
+{
+  if (!out || outSize == 0) return;
+
+  if (readFailed) {
+    snprintf(out, outSize, "ERR\nERR");
+    return;
+  }
+
+  if (!present) {
+    snprintf(out, outSize, "---\n---");
+    return;
+  }
+
+  snprintf(out, outSize, "%.1f°F\n%.0f%%", (double)tempF, (double)humidity);
+}
+
+static bool aht_publish_state(bool present, bool readFailed, float tempF, float humidity)
+{
+  char nextDisplay[sizeof(ahtDisplayText)];
+  aht_format_display_text(present, readFailed, tempF, humidity, nextDisplay, sizeof(nextDisplay));
+
+  portENTER_CRITICAL(&ahtStateMux);
+  bool changed = (strcmp(ahtDisplayText, nextDisplay) != 0) ||
+                 (ahtPresent != present) ||
+                 (ahtReadFailed != readFailed);
+  externalTempF = tempF;
+  externalHumidity = humidity;
+  ahtPresent = present;
+  ahtReadFailed = readFailed;
+  if (changed) {
+    strncpy(ahtDisplayText, nextDisplay, sizeof(ahtDisplayText) - 1);
+    ahtDisplayText[sizeof(ahtDisplayText) - 1] = '\0';
+    ahtUiDirty = true;
+  }
+  portEXIT_CRITICAL(&ahtStateMux);
+
+  return changed;
+}
+
 static void aht_not_found(const char* reason)
 {
   Serial.print("AHT not found");
@@ -1581,6 +1667,14 @@ static bool aht_is_selected()
   return false;
 }
 
+static bool aht_is_present()
+{
+  portENTER_CRITICAL(&ahtStateMux);
+  bool present = ahtPresent;
+  portEXIT_CRITICAL(&ahtStateMux);
+  return present;
+}
+
 static void aht_init()
 {
   if (AHT_DEBUG_VERBOSE) {
@@ -1611,6 +1705,7 @@ static void aht_init()
   ahtReadFailureReported = false;
   externalTempF = 0.0f;
   externalHumidity = 0.0f;
+  aht_publish_state(false, false, 0.0f, 0.0f);
 
   if (!aht_read_status("initial status", &status)) {
     aht_not_found("status read failed");
@@ -1694,44 +1789,79 @@ static void aht_init()
   ahtReadFailureCount = 0;
   ahtReadFailed = false;
   ahtReadFailureReported = false;
-  ahtPresent = true;
+  aht_publish_state(true, false, tempF, humidity);
   Serial.println("AHT found");
   if (AHT_DEBUG_VERBOSE) {
     Serial.printf("AHT temp=%.1f F humidity=%.1f %%\n", externalTempF, externalHumidity);
   }
 }
 
-static void aht_update()
+static void aht_poll_once()
 {
-  static uint32_t last_read_ms = 0;
-  uint32_t now = millis();
-  if (!ahtPresent || (now - last_read_ms) < 1000) return;
-  last_read_ms = now;
+  if (!aht_is_present()) return;
 
   float tempF = 0.0f;
   float humidity = 0.0f;
   if (!aht_read_sample(&tempF, &humidity)) {
     ahtReadFailureCount++;
-    ahtReadFailed = true;
+    aht_publish_state(true, true, externalTempF, externalHumidity);
     if (ahtReadFailureCount >= AHT_MAX_READ_FAILURES && !ahtReadFailureReported) {
       Serial.println("AHT read failed");
       ahtReadFailureReported = true;
     }
-    rebuild_latest_json();
-    update_readings_from_frames();
     return;
   }
 
   ahtReadFailureCount = 0;
-  ahtReadFailed = false;
   ahtReadFailureReported = false;
-  externalTempF = tempF;
-  externalHumidity = humidity;
+  aht_publish_state(true, false, tempF, humidity);
   if (AHT_DEBUG_VERBOSE) {
-    Serial.printf("AHT temp=%.1f F humidity=%.1f %%\n", externalTempF, externalHumidity);
+    Serial.printf("AHT temp=%.1f F humidity=%.1f %%\n", tempF, humidity);
   }
+}
+
+static void aht_task(void*)
+{
+  for (;;) {
+    if (aht_is_selected()) {
+      aht_poll_once();
+      vTaskDelay(pdMS_TO_TICKS(AHT_POLL_INTERVAL_MS));
+    } else {
+      vTaskDelay(pdMS_TO_TICKS(250));
+    }
+  }
+}
+
+static void aht_start_task()
+{
+  if (ahtTaskHandle) return;
+
+  BaseType_t ok = xTaskCreate(
+    aht_task,
+    "aht",
+    4096,
+    nullptr,
+    1,
+    &ahtTaskHandle
+  );
+  if (ok != pdPASS) {
+    ahtTaskHandle = nullptr;
+    aht_not_found("task create failed");
+  }
+}
+
+static void aht_handle_ui_update()
+{
+  bool dirty = false;
+  portENTER_CRITICAL(&ahtStateMux);
+  dirty = ahtUiDirty;
+  if (dirty) ahtUiDirty = false;
+  portEXIT_CRITICAL(&ahtStateMux);
+
+  if (!dirty || !aht_is_selected()) return;
+
   rebuild_latest_json();
-  update_readings_from_frames();
+  update_cabin_reading_from_state();
 }
 #endif
 
@@ -1773,6 +1903,10 @@ void setup()
   build_ui();
   lvgl_port_unlock();
 
+#if ENABLE_AHT
+  aht_start_task();
+#endif
+
   rebuild_latest_json();
 
   #if ENABLE_WIFI_WEB
@@ -1802,9 +1936,7 @@ void loop()
   #endif
 
 #if ENABLE_AHT
-  if (aht_is_selected()) {
-    aht_update();
-  }
+  aht_handle_ui_update();
 #endif
 
   delay(5);
