@@ -10,6 +10,12 @@
 #include "esp_display_panel.hpp"
 #include "lvgl_v8_port.h"
 
+#define ENABLE_AHT 1
+
+#if ENABLE_AHT
+  #include "driver/i2c.h"
+#endif
+
 #define USE_CUSTOM_FONT_64 0
 #if USE_CUSTOM_FONT_64
   #include "montserrat_64.c"
@@ -17,9 +23,6 @@
 #endif
 
 #include "ALDLCore.h"
-
-// ----------------- Layout toggle pin -----------------
-#define MODE_PIN 20
 
 // ----------------- ALDL pins -----------------
 #define ENABLE_ALDL 1
@@ -40,6 +43,23 @@
 #define F5_VALID_LEN           70
 #define FRAME_LOG_CAPACITY     50
 
+#if ENABLE_AHT
+// ----------------- AHT sensor on dedicated I2C bus -----------------
+#define AHT_I2C_SDA_PIN 10
+#define AHT_I2C_SCL_PIN 13
+#define AHT_I2C_PORT    I2C_NUM_1
+#define AHT_I2C_FREQ_HZ 100000
+#define AHT_I2C_TIMEOUT_MS 10
+#define AHT_MAX_READ_FAILURES 3
+#define AHT_I2C_ADDR_DEFAULT 0x38
+#define AHT_CMD_CALIBRATE 0xE1
+#define AHT_CMD_TRIGGER 0xAC
+#define AHT_CMD_SOFTRESET 0xBA
+#define AHT_STATUS_BUSY 0x80
+#define AHT_STATUS_CALIBRATED 0x08
+#define AHT_DEBUG_VERBOSE 0
+#endif
+
 #define ENABLE_WIFI_WEB 0
 #if ENABLE_WIFI_WEB
 #include <WiFi.h>
@@ -55,6 +75,16 @@ static const uint32_t TILE_ACCENT_HEX[6] = {
 static const uint32_t TILE_VALUE_HEX[6] = {
   0x39FF14, 0xFFD400, 0x5DF2FF, 0xFF69B4, 0x5DF2FF, 0xB084FF
 };
+
+#if ENABLE_AHT
+static const char* AHT_CABIN_ID = "AHT_CABIN";
+static const char* AHT_OLD_OUTSIDE_TEMP_ID = "AHT_OUTSIDE_TEMP_F";
+static const char* AHT_OLD_OUTSIDE_HUMIDITY_ID = "AHT_OUTSIDE_HUMIDITY";
+static const DataField AHT_FIELDS[] = {
+  { "AHT_CABIN", "Cabin", "", 0, 0, 1.0f, 0.0f, 1 },
+};
+static const size_t AHT_FIELD_COUNT = sizeof(AHT_FIELDS) / sizeof(AHT_FIELDS[0]);
+#endif
 
 PersistentIDs idStore;
 
@@ -113,6 +143,15 @@ static size_t   lastRejectedLengthF5 = 0;
 static uint32_t normalized67CountF4 = 0;
 static uint32_t normalized68CountF5 = 0;
 
+float externalTempF = 0.0f;
+float externalHumidity = 0.0f;
+bool ahtPresent = false;
+#if ENABLE_AHT
+static uint8_t ahtReadFailureCount = 0;
+static bool ahtReadFailed = false;
+static bool ahtReadFailureReported = false;
+#endif
+
 static char frameLog[FRAME_LOG_CAPACITY][FRAME_MAX_LEN * 3 + 64] = {{0}};
 static uint16_t frameLogCount = 0;
 static uint16_t frameLogHead = 0;
@@ -131,7 +170,6 @@ static void list_item_event_cb(lv_event_t *e);
 static void advance_saved_field(int slot_idx);
 static void update_slot_labels_from_id(int idx);
 static void update_detail_from_slot(int idx);
-static void handle_mode_button();
 
 static const DataField* getFieldByCombinedIndex(int idx, FieldSource* srcOut = nullptr);
 static int getCombinedFieldCount();
@@ -145,6 +183,12 @@ static bool decode_field_to_text_from_frame(const DataField* f, const uint8_t* f
 static bool decode_selected_id_to_text(const char* id, char* out, size_t outSize);
 static void update_readings_from_frames();
 static void determineRequiredCommands(bool &needF4, bool &needF5);
+#if ENABLE_AHT
+static void migrate_legacy_aht_ids();
+static bool aht_is_selected();
+static void aht_init();
+static void aht_update();
+#endif
 
 #if ENABLE_WIFI_WEB
 static void wifi_init();
@@ -154,7 +198,6 @@ static void handleData();
 static void handleJson();
 static void handleLog();
 #endif
-
 // ----------------- Helpers -----------------
 static const DataField* getFieldByCombinedIndex(int idx, FieldSource* srcOut)
 {
@@ -168,13 +211,24 @@ static const DataField* getFieldByCombinedIndex(int idx, FieldSource* srcOut)
     if (srcOut) *srcOut = FIELD_F5;
     return &COMMAND0_FIELDS[idx];
   }
+#if ENABLE_AHT
+  idx -= (int)COMMAND0_FIELD_COUNT;
+  if (idx < (int)AHT_FIELD_COUNT) {
+    if (srcOut) *srcOut = FIELD_NONE;
+    return &AHT_FIELDS[idx];
+  }
+#endif
   if (srcOut) *srcOut = FIELD_NONE;
   return nullptr;
 }
 
 static int getCombinedFieldCount()
 {
-  return (int)COMMAND1_FIELD_COUNT + (int)COMMAND0_FIELD_COUNT;
+  int count = (int)COMMAND1_FIELD_COUNT + (int)COMMAND0_FIELD_COUNT;
+#if ENABLE_AHT
+  count += (int)AHT_FIELD_COUNT;
+#endif
+  return count;
 }
 
 static int combined_index_of_id(const char* id)
@@ -193,6 +247,13 @@ static const DataField* findFieldForSelectedID(const char* id, FieldSource* srcO
   if (srcOut) *srcOut = src;
   if (src == FIELD_F4) return findFieldByID(id, COMMAND1_FIELDS, COMMAND1_FIELD_COUNT);
   if (src == FIELD_F5) return findFieldByID(id, COMMAND0_FIELDS, COMMAND0_FIELD_COUNT);
+#if ENABLE_AHT
+  if (id) {
+    for (size_t i = 0; i < AHT_FIELD_COUNT; i++) {
+      if (strcmp(id, AHT_FIELDS[i].id) == 0) return &AHT_FIELDS[i];
+    }
+  }
+#endif
   return nullptr;
 }
 
@@ -281,9 +342,7 @@ static void advance_saved_field(int slot_idx)
   if (tileValues[slot_idx]) lv_label_set_text(tileValues[slot_idx], "--");
   if (list_value_lbl[slot_idx]) lv_label_set_text(list_value_lbl[slot_idx], "--");
 
-  if (haveValidFrameF4 || haveValidFrameF5) {
-    update_readings_from_frames();
-  }
+  update_readings_from_frames();
 
   if (selected_slot == slot_idx && layout_mode == LAYOUT_LIST_DETAIL) {
     update_detail_from_slot(slot_idx);
@@ -460,10 +519,35 @@ static bool decode_field_to_text_from_frame(const DataField* f, const uint8_t* f
   return true;
 }
 
+#if ENABLE_AHT
+static bool decode_aht_id_to_text(const char* id, char* out, size_t outSize)
+{
+  if (!id || !out || outSize == 0) return false;
+
+  if (strcmp(id, AHT_CABIN_ID) != 0) return false;
+
+  if (ahtReadFailed) {
+    snprintf(out, outSize, "ERR\nERR");
+    return true;
+  }
+
+  if (!ahtPresent) {
+    snprintf(out, outSize, "---\n---");
+    return true;
+  }
+
+  snprintf(out, outSize, "%.1f°F\n%.1f%%", (double)externalTempF, (double)externalHumidity);
+  return true;
+}
+#endif
+
 static bool decode_selected_id_to_text(const char* id, char* out, size_t outSize)
 {
   if (!out || outSize == 0) return false;
   out[0] = '\0';
+#if ENABLE_AHT
+  if (decode_aht_id_to_text(id, out, outSize)) return true;
+#endif
   FieldSource src = FIELD_NONE;
   const DataField* f = findFieldForSelectedID(id, &src);
   if (!f) return false;
@@ -529,6 +613,11 @@ static void rebuild_latest_json()
     decode_selected_id_to_text(id, valueBuf, sizeof(valueBuf));
 
     const char* srcName = (src == FIELD_F4) ? "F4" : ((src == FIELD_F5) ? "F5" : "?");
+#if ENABLE_AHT
+    if (id && strcmp(id, AHT_CABIN_ID) == 0) {
+      srcName = "AHT";
+    }
+#endif
     n = snprintf(latestJson + pos, sizeof(latestJson) - pos,
                  "%s{\"slot\":%d,\"name\":\"%s\",\"value\":\"%s\",\"symbol\":\"%s\",\"src\":\"%s\"}",
                  (i == 0) ? "" : ",",
@@ -739,9 +828,7 @@ static void build_ui()
     update_detail_from_slot(selected_slot);
   }
 
-  if (haveValidFrameF4 || haveValidFrameF5) {
-    update_readings_from_frames();
-  }
+  update_readings_from_frames();
 }
 
 static void build_ui_tiles()
@@ -994,34 +1081,6 @@ static void build_ui_list_detail()
   update_detail_from_slot(selected_slot);
 }
 
-// ----------------- Mode switch handling -----------------
-static void handle_mode_button()
-{
-  bool raw_pressed = (digitalRead(MODE_PIN) == LOW);
-  static bool last_raw = false;
-  static bool stable = false;
-  static uint32_t last_change_ms = 0;
-  uint32_t now = millis();
-
-  if (raw_pressed != last_raw) {
-    last_raw = raw_pressed;
-    last_change_ms = now;
-  }
-
-  if ((now - last_change_ms) >= 30) {
-    if (stable != last_raw) {
-      stable = last_raw;
-      if (stable) {
-        layout_mode = (layout_mode == LAYOUT_TILES) ? LAYOUT_LIST_DETAIL : LAYOUT_TILES;
-        lvgl_port_lock(-1);
-        build_ui();
-        lvgl_port_unlock();
-        Serial.printf("Layout toggled -> %s\n", layout_mode == LAYOUT_TILES ? "TILES" : "LIST+DETAIL");
-      }
-    }
-  }
-}
-
 #if ENABLE_ALDL
 static HardwareSerial ALDLSerial(1);
 
@@ -1202,18 +1261,6 @@ static void poll_one_command(FieldSource src)
   uint8_t raw[FRAME_MAX_LEN] = {0};
   size_t rawLen = receive_raw_frame(raw, sizeof(raw));
 
-  if (src == FIELD_F5) {
-    Serial.print("F5 rawLen = ");
-    Serial.println(rawLen);
-    Serial.print("F5 first bytes: ");
-    for (size_t i = 0; i < rawLen && i < 8; i++) {
-      if (raw[i] < 16) Serial.print('0');
-      Serial.print(raw[i], HEX);
-      Serial.print(' ');
-    }
-    Serial.println();
-  }
-
   aldl_enable_rx(false);
 
   update_latest_raw_frame_buffers(raw, rawLen);
@@ -1285,16 +1332,418 @@ static void aldl_poll()
 }
 #endif
 
+// ----------------- AHT sensor handling -----------------
+#if ENABLE_AHT
+static const char* aht_err_name(esp_err_t err)
+{
+  const char* name = esp_err_to_name(err);
+  return name ? name : "UNKNOWN";
+}
+
+static esp_err_t i2c_probe_address(uint8_t address)
+{
+  i2c_cmd_handle_t cmd = i2c_cmd_link_create();
+  if (!cmd) return ESP_ERR_NO_MEM;
+
+  i2c_master_start(cmd);
+  i2c_master_write_byte(cmd, (address << 1) | I2C_MASTER_WRITE, true);
+  i2c_master_stop(cmd);
+  esp_err_t err = i2c_master_cmd_begin(AHT_I2C_PORT, cmd, pdMS_TO_TICKS(AHT_I2C_TIMEOUT_MS));
+  i2c_cmd_link_delete(cmd);
+  return err;
+}
+
+static bool aht_i2c_begin()
+{
+  if (AHT_DEBUG_VERBOSE) {
+    Serial.printf(
+      "AHT I2C begin: configuring legacy port=%d SDA=%d SCL=%d freq=%u\n",
+      (int)AHT_I2C_PORT,
+      AHT_I2C_SDA_PIN,
+      AHT_I2C_SCL_PIN,
+      (unsigned)AHT_I2C_FREQ_HZ
+    );
+    Serial.flush();
+  }
+
+  i2c_config_t conf = {};
+  conf.mode = I2C_MODE_MASTER;
+  conf.sda_io_num = (gpio_num_t)AHT_I2C_SDA_PIN;
+  conf.scl_io_num = (gpio_num_t)AHT_I2C_SCL_PIN;
+  conf.sda_pullup_en = GPIO_PULLUP_ENABLE;
+  conf.scl_pullup_en = GPIO_PULLUP_ENABLE;
+  conf.master.clk_speed = AHT_I2C_FREQ_HZ;
+
+  esp_err_t err = i2c_param_config(AHT_I2C_PORT, &conf);
+  if (AHT_DEBUG_VERBOSE) {
+    Serial.printf("AHT I2C param_config result=%s (%d)\n", aht_err_name(err), (int)err);
+  }
+  if (err != ESP_OK) return false;
+
+  err = i2c_driver_install(AHT_I2C_PORT, conf.mode, 0, 0, 0);
+  if (AHT_DEBUG_VERBOSE) {
+    Serial.printf("AHT I2C driver_install result=%s (%d)\n", aht_err_name(err), (int)err);
+  }
+  if (err == ESP_OK || err == ESP_ERR_INVALID_STATE) return true;
+  return false;
+}
+
+static void i2c_scan_aht_bus()
+{
+  if (!AHT_DEBUG_VERBOSE) return;
+  Serial.println("I2C scan starting");
+  for (uint8_t address = 0x03; address <= 0x77; address++) {
+    esp_err_t err = i2c_probe_address(address);
+    if (err == ESP_OK) {
+      Serial.printf("I2C found 0x%02X\n", address);
+    }
+    delay(1);
+  }
+  Serial.println("I2C scan done");
+}
+
+static esp_err_t aht_i2c_write(const char* label, const uint8_t* data, size_t len)
+{
+  if (AHT_DEBUG_VERBOSE) {
+    Serial.printf("AHT I2C begin: %s write addr=0x%02X len=%u timeout=%ums\n",
+                  label, AHT_I2C_ADDR_DEFAULT, (unsigned)len, AHT_I2C_TIMEOUT_MS);
+    Serial.flush();
+  }
+  esp_err_t err = i2c_master_write_to_device(
+                    AHT_I2C_PORT,
+                    AHT_I2C_ADDR_DEFAULT,
+                    data,
+                    len,
+                    pdMS_TO_TICKS(AHT_I2C_TIMEOUT_MS)
+                  );
+  if (AHT_DEBUG_VERBOSE) {
+    Serial.printf("AHT I2C end: %s write result=%s (%d)\n", label, aht_err_name(err), (int)err);
+  }
+  return err;
+}
+
+static esp_err_t aht_i2c_read(const char* label, uint8_t* data, size_t len)
+{
+  if (AHT_DEBUG_VERBOSE) {
+    Serial.printf("AHT I2C begin: %s read addr=0x%02X len=%u timeout=%ums\n",
+                  label, AHT_I2C_ADDR_DEFAULT, (unsigned)len, AHT_I2C_TIMEOUT_MS);
+    Serial.flush();
+  }
+  esp_err_t err = i2c_master_read_from_device(
+                    AHT_I2C_PORT,
+                    AHT_I2C_ADDR_DEFAULT,
+                    data,
+                    len,
+                    pdMS_TO_TICKS(AHT_I2C_TIMEOUT_MS)
+                  );
+  if (AHT_DEBUG_VERBOSE) {
+    Serial.printf("AHT I2C end: %s read result=%s (%d)\n", label, aht_err_name(err), (int)err);
+  }
+  return err;
+}
+
+static bool aht_read_status(const char* label, uint8_t* status)
+{
+  if (!status) {
+    if (AHT_DEBUG_VERBOSE) Serial.printf("AHT status read skipped: %s null buffer\n", label);
+    return false;
+  }
+  esp_err_t err = aht_i2c_read(label, status, 1);
+  if (err != ESP_OK) return false;
+  if (AHT_DEBUG_VERBOSE) Serial.printf("AHT status: %s 0x%02X\n", label, *status);
+  return true;
+}
+
+static void aht_print_status_bits(const char* label, uint8_t status)
+{
+  Serial.printf("AHT status bits: %s busy=%u calibrated=%u raw=0x%02X\n",
+                label,
+                (status & AHT_STATUS_BUSY) ? 1 : 0,
+                (status & AHT_STATUS_CALIBRATED) ? 1 : 0,
+                status);
+}
+
+static bool aht_wait_not_busy(const char* label, uint32_t timeout_ms)
+{
+  if (AHT_DEBUG_VERBOSE) {
+    Serial.printf("AHT wait starting: %s timeout=%lums\n", label, (unsigned long)timeout_ms);
+  }
+  uint32_t start = millis();
+  uint8_t status = AHT_STATUS_BUSY;
+
+  do {
+    if (!aht_read_status(label, &status)) {
+      if (AHT_DEBUG_VERBOSE) Serial.printf("AHT wait failed: %s status read failed\n", label);
+      return false;
+    }
+    if (AHT_DEBUG_VERBOSE) aht_print_status_bits(label, status);
+    if ((status & AHT_STATUS_BUSY) == 0) {
+      if (AHT_DEBUG_VERBOSE) {
+        Serial.printf("AHT wait OK: %s ready after %lums\n",
+                      label, (unsigned long)(millis() - start));
+      }
+      return true;
+    }
+    delay(10);
+  } while ((millis() - start) < timeout_ms);
+
+  if (AHT_DEBUG_VERBOSE) {
+    Serial.printf("AHT wait failed: %s busy timeout after %lums status=0x%02X\n",
+                  label, (unsigned long)timeout_ms, status);
+  }
+  return false;
+}
+
+static bool aht_read_sample(float* tempF, float* humidity)
+{
+  uint8_t trigger_cmd[3] = { AHT_CMD_TRIGGER, 0x33, 0x00 };
+  if (AHT_DEBUG_VERBOSE) Serial.println("AHT measurement: trigger command 0xAC 0x33 0x00");
+  if (aht_i2c_write("trigger measurement", trigger_cmd, sizeof(trigger_cmd)) != ESP_OK) {
+    if (AHT_DEBUG_VERBOSE) Serial.println("AHT measurement failed: trigger write failed");
+    return false;
+  }
+
+  if (AHT_DEBUG_VERBOSE) Serial.println("AHT measurement: trigger delay 80ms starting");
+  delay(80);
+  if (AHT_DEBUG_VERBOSE) Serial.println("AHT measurement: trigger delay complete");
+  if (!aht_wait_not_busy("measurement wait", 120)) {
+    if (AHT_DEBUG_VERBOSE) Serial.println("AHT measurement failed: sensor stayed busy or status read failed");
+    return false;
+  }
+
+  uint8_t data[6] = {0};
+  if (aht_i2c_read("read measurement", data, sizeof(data)) != ESP_OK) {
+    if (AHT_DEBUG_VERBOSE) Serial.println("AHT measurement failed: read measurement failed");
+    return false;
+  }
+  if (AHT_DEBUG_VERBOSE) {
+    Serial.printf("AHT measurement raw: %02X %02X %02X %02X %02X %02X\n",
+                  data[0], data[1], data[2], data[3], data[4], data[5]);
+  }
+  if (data[0] & AHT_STATUS_BUSY) {
+    if (AHT_DEBUG_VERBOSE) {
+      Serial.printf("AHT measurement failed: busy status after read 0x%02X\n", data[0]);
+    }
+    return false;
+  }
+
+  uint32_t rawHumidity = ((uint32_t)data[1] << 12) |
+                         ((uint32_t)data[2] << 4) |
+                         ((uint32_t)data[3] >> 4);
+  uint32_t rawTemp = (((uint32_t)data[3] & 0x0F) << 16) |
+                     ((uint32_t)data[4] << 8) |
+                     (uint32_t)data[5];
+
+  float humidityPct = ((float)rawHumidity * 100.0f) / 1048576.0f;
+  float tempC = (((float)rawTemp * 200.0f) / 1048576.0f) - 50.0f;
+
+  if (tempF) *tempF = (tempC * 9.0f / 5.0f) + 32.0f;
+  if (humidity) *humidity = humidityPct;
+  if (AHT_DEBUG_VERBOSE) {
+    Serial.printf("AHT measurement parsed: tempF=%.1f humidity=%.1f\n",
+                  (tempC * 9.0f / 5.0f) + 32.0f, humidityPct);
+  }
+  return true;
+}
+
+static void aht_not_found(const char* reason)
+{
+  Serial.print("AHT not found");
+  if (reason && reason[0]) {
+    Serial.print(": ");
+    Serial.print(reason);
+  }
+  Serial.println();
+}
+
+static void migrate_legacy_aht_ids()
+{
+  bool changed = false;
+  for (int i = 0; i < kSlotCount; i++) {
+    const char* id = idStore.getID(i);
+    if (id && (strcmp(id, AHT_OLD_OUTSIDE_TEMP_ID) == 0 ||
+               strcmp(id, AHT_OLD_OUTSIDE_HUMIDITY_ID) == 0)) {
+      idStore.setID(i, AHT_CABIN_ID);
+      changed = true;
+    }
+  }
+  if (changed) idStore.save();
+}
+
+static bool aht_is_selected()
+{
+  for (int i = 0; i < kSlotCount; i++) {
+    const char* id = idStore.getID(i);
+    if (id && strcmp(id, AHT_CABIN_ID) == 0) {
+      return true;
+    }
+  }
+  return false;
+}
+
+static void aht_init()
+{
+  if (AHT_DEBUG_VERBOSE) {
+    Serial.println("AHT init starting");
+    Serial.printf(
+      "AHT probing legacy I2C port=%d addr=0x%02X SDA=%d SCL=%d\n",
+      (int)AHT_I2C_PORT,
+      AHT_I2C_ADDR_DEFAULT,
+      AHT_I2C_SDA_PIN,
+      AHT_I2C_SCL_PIN
+    );
+  }
+
+  if (!aht_i2c_begin()) {
+    aht_not_found("AHT I2C bus init failed");
+    return;
+  }
+
+  i2c_scan_aht_bus();
+
+  uint8_t status = 0;
+  uint8_t reset_cmd = AHT_CMD_SOFTRESET;
+  uint8_t calibrate_cmd[3] = { AHT_CMD_CALIBRATE, 0x08, 0x00 };
+
+  ahtPresent = false;
+  ahtReadFailureCount = 0;
+  ahtReadFailed = false;
+  ahtReadFailureReported = false;
+  externalTempF = 0.0f;
+  externalHumidity = 0.0f;
+
+  if (!aht_read_status("initial status", &status)) {
+    aht_not_found("status read failed");
+    return;
+  }
+  if (AHT_DEBUG_VERBOSE) aht_print_status_bits("initial status", status);
+
+  if (aht_i2c_write("soft reset", &reset_cmd, 1) != ESP_OK) {
+    aht_not_found("soft reset write failed");
+    return;
+  }
+
+  if (AHT_DEBUG_VERBOSE) Serial.println("AHT init: soft reset delay 20ms starting");
+  delay(20);
+  if (AHT_DEBUG_VERBOSE) Serial.println("AHT init: soft reset delay complete");
+  if (!aht_read_status("post soft reset status", &status)) {
+    aht_not_found("post soft reset status read failed");
+    return;
+  }
+  if (AHT_DEBUG_VERBOSE) aht_print_status_bits("post soft reset status", status);
+
+  if (!aht_wait_not_busy("soft reset wait", 250)) {
+    aht_not_found("busy after soft reset");
+    return;
+  }
+
+  if (!aht_read_status("post soft reset wait status", &status)) {
+    aht_not_found("post soft reset wait status read failed");
+    return;
+  }
+  if (AHT_DEBUG_VERBOSE) aht_print_status_bits("post soft reset wait status", status);
+
+  if (status & AHT_STATUS_CALIBRATED) {
+    if (AHT_DEBUG_VERBOSE) Serial.println("AHT init: calibration bit already set after reset");
+  } else {
+    if (AHT_DEBUG_VERBOSE) Serial.println("AHT init: calibration command 0xE1 0x08 0x00");
+    esp_err_t cal_err = aht_i2c_write("calibrate", calibrate_cmd, sizeof(calibrate_cmd));
+    if (AHT_DEBUG_VERBOSE) {
+      Serial.printf("AHT init: calibration write final result=%s (%d)\n",
+                    aht_err_name(cal_err), (int)cal_err);
+    }
+    if (cal_err != ESP_OK) {
+      if (AHT_DEBUG_VERBOSE) Serial.println("AHT calibration failed: command write did not complete");
+      aht_not_found("calibrate write failed");
+      return;
+    }
+
+    if (!aht_wait_not_busy("calibration wait", 250)) {
+      if (AHT_DEBUG_VERBOSE) Serial.println("AHT calibration failed: sensor stayed busy or status read failed");
+      aht_not_found("calibration wait failed");
+      return;
+    }
+  }
+
+  if (!aht_read_status("calibration verify", &status)) {
+    aht_not_found("calibration verify status read failed");
+    return;
+  }
+  if (AHT_DEBUG_VERBOSE) aht_print_status_bits("calibration verify", status);
+  if (status & AHT_STATUS_BUSY) {
+    if (AHT_DEBUG_VERBOSE) Serial.printf("AHT calibration failed: still busy status=0x%02X\n", status);
+    aht_not_found("calibration verify still busy");
+    return;
+  }
+  if (!(status & AHT_STATUS_CALIBRATED)) {
+    if (AHT_DEBUG_VERBOSE) Serial.printf("AHT calibration failed: calibrated bit not set status=0x%02X\n", status);
+    aht_not_found("calibration bit not set");
+    return;
+  }
+
+  if (AHT_DEBUG_VERBOSE) Serial.println("AHT init: validating first measurement before marking present");
+  float tempF = 0.0f;
+  float humidity = 0.0f;
+  if (!aht_read_sample(&tempF, &humidity)) {
+    aht_not_found("initial measurement read failed");
+    return;
+  }
+
+  externalTempF = tempF;
+  externalHumidity = humidity;
+  ahtReadFailureCount = 0;
+  ahtReadFailed = false;
+  ahtReadFailureReported = false;
+  ahtPresent = true;
+  Serial.println("AHT found");
+  if (AHT_DEBUG_VERBOSE) {
+    Serial.printf("AHT temp=%.1f F humidity=%.1f %%\n", externalTempF, externalHumidity);
+  }
+}
+
+static void aht_update()
+{
+  static uint32_t last_read_ms = 0;
+  uint32_t now = millis();
+  if (!ahtPresent || (now - last_read_ms) < 1000) return;
+  last_read_ms = now;
+
+  float tempF = 0.0f;
+  float humidity = 0.0f;
+  if (!aht_read_sample(&tempF, &humidity)) {
+    ahtReadFailureCount++;
+    ahtReadFailed = true;
+    if (ahtReadFailureCount >= AHT_MAX_READ_FAILURES && !ahtReadFailureReported) {
+      Serial.println("AHT read failed");
+      ahtReadFailureReported = true;
+    }
+    rebuild_latest_json();
+    update_readings_from_frames();
+    return;
+  }
+
+  ahtReadFailureCount = 0;
+  ahtReadFailed = false;
+  ahtReadFailureReported = false;
+  externalTempF = tempF;
+  externalHumidity = humidity;
+  if (AHT_DEBUG_VERBOSE) {
+    Serial.printf("AHT temp=%.1f F humidity=%.1f %%\n", externalTempF, externalHumidity);
+  }
+  rebuild_latest_json();
+  update_readings_from_frames();
+}
+#endif
+
 // ----------------- Setup / Loop -----------------
 void setup()
 {
   Serial.begin(115200);
-  delay(200);
+  delay(1200);
 
-  pinMode(MODE_PIN, INPUT_PULLUP);
   layout_mode = LAYOUT_TILES;
 
-  Serial.printf("Dash starting... MODE_PIN=%d -> %s\n", MODE_PIN, layout_mode == LAYOUT_TILES ? "TILES" : "LIST+DETAIL");
+  Serial.printf("Dash starting... layout=%s\n", layout_mode == LAYOUT_TILES ? "TILES" : "LIST+DETAIL");
   Serial.printf("Free heap after init: %lu\n", (unsigned long)ESP.getFreeHeap());
 
   using namespace esp_panel::board;
@@ -1309,9 +1758,16 @@ void setup()
   auto bl = board->getBacklight();
   if (bl) bl->on();
 
+#if ENABLE_AHT
+  aht_init();
+#endif
+
   lvgl_port_init(board->getLCD(), board->getTouch());
   lv_disp_set_rotation(lv_disp_get_default(), LV_DISP_ROT_270);  // 90 degrees clockwise from current 180 orientation
   idStore.begin();
+#if ENABLE_AHT
+  migrate_legacy_aht_ids();
+#endif
 
   lvgl_port_lock(-1);
   build_ui();
@@ -1328,7 +1784,7 @@ void setup()
   #endif
 
   Serial.printf("Free heap after init: %lu\n", (unsigned long)ESP.getFreeHeap());
-  Serial.println("UI built. Tap items to cycle sensors. Press MODE_PIN to toggle layouts.");
+  Serial.println("UI built. Tap items to cycle sensors.");
   Serial.println("Polling logic now follows the six selected cells:");
   Serial.println("- only F4 fields selected -> F4 only");
   Serial.println("- only F5 fields selected -> F5 only");
@@ -1337,8 +1793,6 @@ void setup()
 
 void loop()
 {
-  handle_mode_button();
-
   #if ENABLE_WIFI_WEB
     wifi_handle();
   #endif
@@ -1346,6 +1800,12 @@ void loop()
   #if ENABLE_ALDL
     aldl_poll();
   #endif
+
+#if ENABLE_AHT
+  if (aht_is_selected()) {
+    aht_update();
+  }
+#endif
 
   delay(5);
 }
