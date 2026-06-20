@@ -4,7 +4,8 @@ A custom ESP32-S3 based digital dashboard for OBD1/ALDL-equipped GM vehicles.
 
 This project runs on a 5" ESP32-S3 touchscreen display and reads live ALDL data directly from the vehicle ECM, presenting it in a configurable touch-driven dashboard. Each tile can be customized to display different engine and vehicle parameters, allowing the driver to build a dashboard that fits their needs.
 
-<img width="3024" height="4032" alt="20260618_200750" src="https://github.com/user-attachments/assets/4a9354dc-765f-4647-a0d0-589e056e91f3" />
+<img width="3024" height="4032" alt="20260619_132122" src="https://github.com/user-attachments/assets/64fd99c6-66a2-4e3d-a6a9-ee55358063c5" />
+
 
 ## Features
 
