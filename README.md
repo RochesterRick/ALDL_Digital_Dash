@@ -83,6 +83,8 @@ Current wiring:
 * RX Enable: GPIO11
 * TX Output Enable: GPIO12
 * (optional) Male and Female Connectors Socket and Plugs https://www.amazon.com/dp/B08RMQP6YP
+* (optional) RJ11 Jack for quick easy disconnects https://www.amazon.com/dp/B00R1LFKFG
+* 
 ## Project Goals
 
 The goal of this project is to provide a modern digital dashboard experience for OBD1 GM trucks while remaining inexpensive, open source, and easy to customize.
