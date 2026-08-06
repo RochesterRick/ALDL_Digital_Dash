@@ -85,6 +85,13 @@ Current wiring:
 * (optional) Male and Female Connectors Socket and Plugs https://www.amazon.com/dp/B08RMQP6YP
 * (optional) RJ11 Jack for quick easy disconnects https://www.amazon.com/dp/B00R1LFKFG
 * 
+## Arduino IDE 2.x Setup
+
+Install Arduino IDE 2.x
+Install esp32 by Espressif Systems, inside "Boards Manager"
+<img width="1427" height="897" alt="image" src="https://github.com/user-attachments/assets/b642a8b0-4713-4783-96ac-c2f2d7d116c9" />
+
+
 ## Project Goals
 
 The goal of this project is to provide a modern digital dashboard experience for OBD1 GM trucks while remaining inexpensive, open source, and easy to customize.
