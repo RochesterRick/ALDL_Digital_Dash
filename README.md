@@ -63,7 +63,7 @@ The sensor is only polled when the Cabin tile is actively selected on the dashbo
 
 ### Display
 
-* JC8048W550C / ESP32-8048S050C
+* JC8048W550C / ESP32-8048S050C  https://www.amazon.com/dp/B0DRYS8ZTW
 * ESP32-S3 N16R8
 * 800x480 RGB display
 * GT911 capacitive touch controller
@@ -71,7 +71,7 @@ The sensor is only polled when the Cabin tile is actively selected on the dashbo
 ### ALDL Interface
 
 * ESP32-S3 UART interface
-* 74HC125 level/buffer interface
+* 74HC125 level/buffer interface  https://www.amazon.com/dp/B08R6BCSYC
 * 8192 baud GM ALDL support
 <img width="3024" height="4032" alt="20260618_201219" src="https://github.com/user-attachments/assets/f8283794-205a-4337-9814-b205146ad80f" />
 <img width="1536" height="1024" alt="ChatGPT Image Jun 4, 2026, 11_14_17 AM" src="https://github.com/user-attachments/assets/7c299b2d-4cbc-40c1-b5c0-4347c9fb50e5" />
