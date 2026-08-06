@@ -90,6 +90,8 @@ Current wiring:
 Install Arduino IDE 2.x
 Install esp32 by Espressif Systems, inside "Boards Manager"
 <img width="1427" height="897" alt="image" src="https://github.com/user-attachments/assets/b642a8b0-4713-4783-96ac-c2f2d7d116c9" />
+Install lvgl version 8.4.0 ONLY by kisvegabor DO NOT install version 9.x
+<img width="1427" height="897" alt="image" src="https://github.com/user-attachments/assets/197a09bf-cad5-4213-8500-c3db7ae66a56" />
 
 
 ## Project Goals
