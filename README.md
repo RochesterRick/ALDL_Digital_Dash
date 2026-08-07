@@ -95,15 +95,6 @@ Install lvgl version 8.4.0 ONLY by kisvegabor DO NOT install version 9.x, in "Li
 Install ESP32_Display_Panel by espressif in "Library Manager"
 <img width="1427" height="897" alt="image" src="https://github.com/user-attachments/assets/45dd05fd-bd06-4116-a2a6-3dca593643db" />
 
-<img width="1427" height="897" alt="image" src="https://github.com/user-attachments/assets/7a547833-8e0b-4963-841f-a56983e2ef0e" />
-<img width="1500" height="974" alt="image" src="https://github.com/user-attachments/assets/4237f043-5c45-4b76-90ce-1a858fe305f7" />
-
-<img width="1427" height="897" alt="image" src="https://github.com/user-attachments/assets/50a19c47-2603-43c3-9b6a-5a29cebf9111" />
-<img width="562" height="449" alt="image" src="https://github.com/user-attachments/assets/8be5b4b3-bd53-45b4-b060-c17d1db74c49" />
-
-
-
-
 
 ## Project Goals
 

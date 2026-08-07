@@ -1,8 +1,0 @@
-git status
-git add .
-git commit -m "what I changed"
-git push
-
-# when stable version:
-git tag Vx_x
-git push origin Vx_x
