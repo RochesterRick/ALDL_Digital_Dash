@@ -88,12 +88,15 @@ Current wiring:
 ## Arduino IDE 2.x Setup
 
 Install Arduino IDE 2.x
-Install ###esp32### by Espressif Systems, inside **`Boards Manager`**
-<img width="1427" height="897" alt="image" src="https://github.com/user-attachments/assets/b642a8b0-4713-4783-96ac-c2f2d7d116c9" />
+Install esp32 by Espressif Systems, inside **`Boards Manager`**
+<img width="360" height="535" alt="image" src="https://github.com/user-attachments/assets/5045bb24-1c25-4c8c-8ace-c2fb25a2e956" />
+
 Install **lvgl** version 8.4.0 ONLY by kisvegabor DO NOT install version 9.x, in **Library Manager**
-<img width="1427" height="897" alt="image" src="https://github.com/user-attachments/assets/197a09bf-cad5-4213-8500-c3db7ae66a56" />
+<img width="379" height="409" alt="image" src="https://github.com/user-attachments/assets/9a625489-184b-4741-8f0b-053d1bedcd8a" />
+
 Install ESP32_Display_Panel by espressif in "Library Manager"
-<img width="1427" height="897" alt="image" src="https://github.com/user-attachments/assets/45dd05fd-bd06-4116-a2a6-3dca593643db" />
+<img width="413" height="386" alt="image" src="https://github.com/user-attachments/assets/35526490-111c-4bda-9652-9a9c9d361f18" />
+
 <img width="1427" height="897" alt="image" src="https://github.com/user-attachments/assets/7a547833-8e0b-4963-841f-a56983e2ef0e" />
 <img width="1500" height="974" alt="image" src="https://github.com/user-attachments/assets/4237f043-5c45-4b76-90ce-1a858fe305f7" />
 
