@@ -88,9 +88,9 @@ Current wiring:
 ## Arduino IDE 2.x Setup
 
 Install Arduino IDE 2.x
-Install <span style="color:red">ESP32</span> by Espressif Systems, inside <span style="color:red">Boards Manager</span>"Boards Manager"
+Install **`ESP32`** by Espressif Systems, inside **`Boards Manager`**
 <img width="1427" height="897" alt="image" src="https://github.com/user-attachments/assets/b642a8b0-4713-4783-96ac-c2f2d7d116c9" />
-Install lvgl version 8.4.0 ONLY by kisvegabor DO NOT install version 9.x, in "Library Manager"
+Install **lvgl** version 8.4.0 ONLY by kisvegabor DO NOT install version 9.x, in **Library Manager**
 <img width="1427" height="897" alt="image" src="https://github.com/user-attachments/assets/197a09bf-cad5-4213-8500-c3db7ae66a56" />
 Install ESP32_Display_Panel by espressif in "Library Manager"
 <img width="1427" height="897" alt="image" src="https://github.com/user-attachments/assets/45dd05fd-bd06-4116-a2a6-3dca593643db" />
