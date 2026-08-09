@@ -94,7 +94,7 @@ Install esp32 by Espressif Systems, inside **`Boards Manager`**
 Install **lvgl** version 8.4.0 ONLY by kisvegabor DO NOT install version 9.x, in **Library Manager**
 <img width="379" height="409" alt="image" src="https://github.com/user-attachments/assets/9a625489-184b-4741-8f0b-053d1bedcd8a" />
 
-Install ESP32_Display_Panel by espressif in "Library Manager" and any dependancies.
+Install ESP32_Display_Panel by espressif in "Library Manager" and any dependencies.
 <img width="413" height="386" alt="image" src="https://github.com/user-attachments/assets/35526490-111c-4bda-9652-9a9c9d361f18" />
 <img width="1427" height="897" alt="image" src="https://github.com/user-attachments/assets/50a19c47-2603-43c3-9b6a-5a29cebf9111" />
 
@@ -110,9 +110,9 @@ Download my Zip file.
 
 * click the ✓ check mark to test compile.
 * Connect your ESP32-8048S050C usb to your pc
-* Select your usb Port (need pic)
+* Select your USB Port (need pic)
 * Click the right arrow → to compile and upload code to your ESP32-8048S050C.
-* by touching a cell will cycle all the avaible emc's data.
+* by touching a cell will cycle all the available ECM data.
 * Enjoy!
 
 ## Project Goals
