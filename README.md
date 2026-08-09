@@ -106,6 +106,8 @@ Download my Zip file.
 
 * Unzip my files into a folder named "ALDL_Digital_Dash"
 * select "File" > "Open" > browse to folder "ALDL_Digital_Dash" > select the file "ALDL_Digital_Dash" > "open"
+<img width="1065" height="808" alt="image" src="https://github.com/user-attachments/assets/2389c836-98fb-456c-9bdd-4cd7397aa9d4" />
+
 * click the check mark to test compile.
 * Connect your ESP32-8048S050C usb to your pc
 * Select your usb Port (need pic)
