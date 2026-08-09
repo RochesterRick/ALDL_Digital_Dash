@@ -94,17 +94,24 @@ Install esp32 by Espressif Systems, inside **`Boards Manager`**
 Install **lvgl** version 8.4.0 ONLY by kisvegabor DO NOT install version 9.x, in **Library Manager**
 <img width="379" height="409" alt="image" src="https://github.com/user-attachments/assets/9a625489-184b-4741-8f0b-053d1bedcd8a" />
 
-Install ESP32_Display_Panel by espressif in "Library Manager"
+Install ESP32_Display_Panel by espressif in "Library Manager" and any dependancies.
 <img width="413" height="386" alt="image" src="https://github.com/user-attachments/assets/35526490-111c-4bda-9652-9a9c9d361f18" />
-
-<img width="1427" height="897" alt="image" src="https://github.com/user-attachments/assets/7a547833-8e0b-4963-841f-a56983e2ef0e" />
-<img width="1500" height="974" alt="image" src="https://github.com/user-attachments/assets/4237f043-5c45-4b76-90ce-1a858fe305f7" />
-
 <img width="1427" height="897" alt="image" src="https://github.com/user-attachments/assets/50a19c47-2603-43c3-9b6a-5a29cebf9111" />
 
+Select "ESP32S3 Dev Module"
+<img width="1500" height="974" alt="image" src="https://github.com/user-attachments/assets/4237f043-5c45-4b76-90ce-1a858fe305f7" />
+
+Download my Zip file.
 <img width="1053" height="588" alt="image" src="https://github.com/user-attachments/assets/b2c1a777-b15d-433d-a99c-110b9725c105" />
 
-
+* Unzip my files into a folder named "ALDL_Digital_Dash"
+* select "File" > "Open" > browse to folder "ALDL_Digital_Dash" > select the file "ALDL_Digital_Dash" > "open"
+* click the check mark to test compile.
+* Connect your ESP32-8048S050C usb to your pc
+* Select your usb Port (need pic)
+* Click the right arrow > to compile and upload code to your ESP32-8048S050C.
+* by touching a cell will cycle all the avaible emc's data.
+* Enjoy!
 
 ## Project Goals
 
