@@ -99,6 +99,7 @@ Install ESP32_Display_Panel by espressif in "Library Manager"
 
 <img width="1427" height="897" alt="image" src="https://github.com/user-attachments/assets/50a19c47-2603-43c3-9b6a-5a29cebf9111" />
 <img width="562" height="449" alt="image" src="https://github.com/user-attachments/assets/8be5b4b3-bd53-45b4-b060-c17d1db74c49" />
+<img width="1053" height="588" alt="image" src="https://github.com/user-attachments/assets/b2c1a777-b15d-433d-a99c-110b9725c105" />
 
 
 
