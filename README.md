@@ -111,7 +111,11 @@ Download my Zip file.
 * click the ✓ check mark to test compile.
 * Connect your ESP32-8048S050C usb to your pc
 * Select your USB Port (need pic)
+<img width="1037" height="586" alt="image" src="https://github.com/user-attachments/assets/080c16d0-4e1a-45a3-a78e-2920be179566" />
+
 * Click the right arrow → to compile and upload code to your ESP32-8048S050C.
+<img width="807" height="264" alt="image" src="https://github.com/user-attachments/assets/164fccd0-00fd-4f9c-9ad8-e7a8d6223298" />
+
 * by touching a cell will cycle all the available ECM data.
 * Enjoy!
 
