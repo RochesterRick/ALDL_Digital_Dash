@@ -76,6 +76,7 @@ The sensor is only polled when the Cabin tile is actively selected on the dashbo
 <img width="3024" height="4032" alt="20260618_201219" src="https://github.com/user-attachments/assets/f8283794-205a-4337-9814-b205146ad80f" />
 <img width="1536" height="1024" alt="ChatGPT Image Jun 4, 2026, 11_14_17 AM" src="https://github.com/user-attachments/assets/7c299b2d-4cbc-40c1-b5c0-4347c9fb50e5" />
 
+
 Current wiring:
 
 * RX: GPIO17
@@ -91,12 +92,15 @@ Current wiring:
 * Install esp32 by Espressif Systems, inside **`Boards Manager`**
 <img width="360" height="535" alt="image" src="https://github.com/user-attachments/assets/5045bb24-1c25-4c8c-8ace-c2fb25a2e956" />
 
+
 * Install **lvgl** version 8.4.0 ONLY by kisvegabor DO NOT install version 9.x, in **Library Manager**
 <img width="379" height="409" alt="image" src="https://github.com/user-attachments/assets/9a625489-184b-4741-8f0b-053d1bedcd8a" />
+
 
 * Install ESP32_Display_Panel by espressif in "Library Manager" and any dependencies.
 <img width="413" height="386" alt="image" src="https://github.com/user-attachments/assets/35526490-111c-4bda-9652-9a9c9d361f18" />
 <img width="1427" height="897" alt="image" src="https://github.com/user-attachments/assets/50a19c47-2603-43c3-9b6a-5a29cebf9111" />
+
 
 * Select "ESP32S3 Dev Module"
 <img width="1500" height="974" alt="image" src="https://github.com/user-attachments/assets/4237f043-5c45-4b76-90ce-1a858fe305f7" />
@@ -104,20 +108,25 @@ Current wiring:
 * Adjust board setting as pictured. 
 <img width="566" height="778" alt="image" src="https://github.com/user-attachments/assets/2262708c-c97d-4be3-9d64-cefe26217f02" />
 
+
 * Download my Zip file.
 <img width="1053" height="588" alt="image" src="https://github.com/user-attachments/assets/b2c1a777-b15d-433d-a99c-110b9725c105" />
+
 
 * Unzip my files into a folder named "ALDL_Digital_Dash"
 * select "File" > "Open" > browse to folder "ALDL_Digital_Dash" > select the file "ALDL_Digital_Dash" > "open"
 <img width="1065" height="808" alt="image" src="https://github.com/user-attachments/assets/2389c836-98fb-456c-9bdd-4cd7397aa9d4" />
+
 
 * click the ✓ check mark to test compile.
 * Connect your ESP32-8048S050C usb to your pc
 * Select your USB Port (need pic)
 <img width="1037" height="586" alt="image" src="https://github.com/user-attachments/assets/080c16d0-4e1a-45a3-a78e-2920be179566" />
 
+
 * Click the right arrow → to compile and upload code to your ESP32-8048S050C.
 <img width="807" height="264" alt="image" src="https://github.com/user-attachments/assets/164fccd0-00fd-4f9c-9ad8-e7a8d6223298" />
+
 
 * by touching a cell will cycle all the available ECM data.
 * Enjoy!
